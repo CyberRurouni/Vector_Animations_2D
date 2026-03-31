@@ -1,0 +1,79 @@
+# Environment variables
+
+.env
+.env.*
+*.env
+
+# Node / Python / general configs
+
+.env.local
+.env.development
+.env.production
+
+# Secrets / keys
+
+*.key
+*.pem
+*.crt
+secrets.json
+
+# OS / editor junk
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependency folders
+
+node_modules/
+venv/
+**pycache**/
+
+# Output (ignore everything inside)
+
+output/
+output/**
+
+# Assets
+
+assets/
+assets/**
+
+# Testing files & folders
+
+test/
+tests/
+**tests**/
+*.test.*
+*.spec.*
+
+# Demo / sample files
+
+demo/
+demos/
+examples/
+*.demo.*
+
+# Temporary files
+
+tmp/
+temp/
+*.tmp
+
+# Coverage reports
+
+coverage/
+
+# Build artifacts
+
+dist/
+build/

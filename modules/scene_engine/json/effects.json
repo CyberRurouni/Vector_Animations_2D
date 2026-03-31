@@ -1,0 +1,39 @@
+{
+    "effects": [
+        {
+            "fn": "pulse",
+            "desc": "Gentle rhythmic size oscillation. Good for idle elements that need to feel alive.",
+            "params": {
+                "start_t": 0.0,
+                "duration": 1.0,
+                "intensity": 0.08
+            }
+        },
+        {
+            "fn": "shake",
+            "desc": "Quick horizontal shake with decay. Use for errors, rejections, or 'wrong' moments.",
+            "params": {
+                "start_t": 0.0,
+                "duration": 0.4,
+                "intensity": 12
+            }
+        },
+        {
+            "fn": "dim",
+            "desc": "Fades element to 40% opacity. Use to de-emphasise a secondary element.",
+            "params": {
+                "start_t": 0.0,
+                "duration": 0.35
+            }
+        },
+        {
+            "fn": "undim",
+            "desc": "Restores a dimmed element to full opacity. Must always be paired with dim.",
+            "params": {
+                "start_t": 0.0,
+                "duration": 0.35
+            }
+        }
+    ],
+    "usage": "Each effect entry is either a plain string (fires at t=0) or a [fn, start_t] array. start_t should be >= the entrance animation duration so the effect fires after the element has settled. dim and undim must always appear together."
+}

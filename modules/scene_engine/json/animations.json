@@ -1,0 +1,108 @@
+{
+    "entrances": [
+        {
+            "fn": "fade_in_desc",
+            "desc": "Fades in with a subtle scale-up. Soft and neutral.",
+            "params": {
+                "duration": 0.6
+            }
+        },
+        {
+            "fn": "pop_desc",
+            "desc": "Scales from 0 with a back-overshoot. Punchy, good for icons.",
+            "params": {
+                "duration": 0.5
+            }
+        },
+
+        {
+            "fn": "bounce_desc",
+            "desc": "Drops from above with a multi-step bounce landing. High energy.",
+            "params": {
+                "duration": 0.8
+            }
+        },
+        {
+            "fn": "elastic_scale_desc",
+            "desc": "Springs in with an elastic overshoot. Very lively.",
+            "params": {
+                "duration": 0.7
+            }
+        },
+        {
+            "fn": "slide_in_from_left_desc",
+            "desc": "Slides in from the left edge. Use for 'before' or negative elements.",
+            "params": {
+                "duration": 0.6
+            }
+        },
+        {
+            "fn": "slide_in_from_right_desc",
+            "desc": "Slides in from the right edge. Use for 'after' or positive elements.",
+            "params": {
+                "duration": 0.6
+            }
+        },
+        {
+            "fn": "slide_in_from_bottom_desc",
+            "desc": "Slides up from below the canvas. Good for upward-momentum moments.",
+            "params": {
+                "duration": 0.6
+            }
+        }
+    ],
+    "exits": [
+        {
+            "fn": "fade_out_desc",
+            "desc": "Fades out with a subtle shrink. Universal exit, pairs with any entrance.",
+            "params": {
+                "duration": 0.6
+            }
+        },
+        {
+            "fn": "pop_out_desc",
+            "desc": "Collapses to zero with a slight shrink. Natural mirror of pop_desc.",
+            "params": {
+                "duration": 0.5
+            }
+        },
+        {
+            "fn": "bounce_out_desc",
+            "desc": "Drops off the bottom of the canvas. Natural mirror of bounce_desc.",
+            "params": {
+                "duration": 0.5
+            }
+        },
+        {
+            "fn": "slide_out_to_left_desc",
+            "desc": "Slides off the left edge. Mirror of slide_in_from_left_desc.",
+            "params": {
+                "duration": 0.5
+            }
+        },
+        {
+            "fn": "slide_out_to_right_desc",
+            "desc": "Slides off the right edge. Mirror of slide_in_from_right_desc.",
+            "params": {
+                "duration": 0.5
+            }
+        },
+        {
+            "fn": "slide_out_to_bottom_desc",
+            "desc": "Slides off below the canvas. Mirror of slide_in_from_bottom_desc.",
+            "params": {
+                "duration": 0.5
+            }
+        }
+    ],
+    "pairing_guide": {
+        "fade_in_desc": "fade_out_desc",
+        "pop_desc": "pop_desc",
+        "pop_out_desc": "pop_out_desc",
+        "bounce_desc": "bounce_out_desc",
+        "elastic_scale_desc": "fade_out_desc",
+        "slide_in_from_left_desc": "slide_out_to_left_desc",
+        "slide_in_from_right_desc": "slide_out_to_right_desc",
+        "slide_in_from_bottom_desc": "slide_out_to_bottom_desc"
+    }
+}
