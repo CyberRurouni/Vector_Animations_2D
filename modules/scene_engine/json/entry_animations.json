@@ -1,0 +1,110 @@
+{
+    "entry_animations": [
+        {
+            "name": "fade_in",
+            "category": "subtle",
+            "energy_level": "low",
+            "description": "Smooth fade-in with slight scale-up (92% → 100%) for a clean and minimal entrance.",
+            "use_cases": [
+                "Calm or professional scenes",
+                "Narration-heavy content",
+                "When animation should not distract",
+                "Default safe choice"
+            ]
+        },
+        {
+            "name": "pop",
+            "category": "scale",
+            "energy_level": "medium",
+            "description": "Quick scale from 0 → overshoot → settle using ease_out_back. Clean and satisfying.",
+            "use_cases": [
+                "General-purpose icon entrances",
+                "UI-style animations",
+                "Explainer videos",
+                "Highlighting elements without being too dramatic"
+            ]
+        },
+        {
+            "name": "pop_in",
+            "category": "scale",
+            "energy_level": "high",
+            "description": "Dramatic scale: 50% → 130% → 100%. Strong visual emphasis for important elements.",
+            "use_cases": [
+                "Hero elements",
+                "Key moments",
+                "Big reveals",
+                "Main subject in a scene"
+            ]
+        },
+        {
+            "name": "bounce",
+            "category": "physics",
+            "energy_level": "high",
+            "description": "Drops from above and bounces into place using a realistic bounce curve.",
+            "use_cases": [
+                "Playful or fun content",
+                "Attention-grabbing moments",
+                "Casual or social media style videos"
+            ]
+        },
+        {
+            "name": "elastic_scale",
+            "category": "scale",
+            "energy_level": "very_high",
+            "description": "Springy elastic scaling with strong oscillation. Very dynamic and energetic.",
+            "use_cases": [
+                "High-energy scenes",
+                "Celebrations or excitement",
+                "Moments requiring strong impact"
+            ],
+            "warnings": [
+                "Use sparingly to avoid visual fatigue",
+                "Not suitable for professional or serious tone"
+            ]
+        },
+        {
+            "name": "slide_in_from_top",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides down from above into position.",
+            "use_cases": [
+                "Introducing new sections",
+                "Structured layouts",
+                "Top-down information flow"
+            ]
+        },
+        {
+            "name": "slide_in_from_left",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides in from the left with slight overshoot.",
+            "use_cases": [
+                "Comparisons (left side entry)",
+                "Timelines",
+                "Directional storytelling"
+            ]
+        },
+        {
+            "name": "slide_in_from_right",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides in from the right edge into position.",
+            "use_cases": [
+                "Comparisons (right side entry)",
+                "Dual elements",
+                "Mirrored animations"
+            ]
+        },
+        {
+            "name": "slide_in_from_bottom",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides up from below into position.",
+            "use_cases": [
+                "Revealing elements",
+                "Progression or growth visuals",
+                "Step-based storytelling"
+            ]
+        }
+    ]
+}

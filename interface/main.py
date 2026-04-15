@@ -1,242 +1,178 @@
+import asyncio
 import logging
+import re
 import os
-import shutil
-import subprocess
+
 from .script import script
+from .utils import (
+    ensure_output_dirs,
+    cleanup_intermediate_dirs,
+    get_audio_duration_ms,
+    log_segment_duration_diff,
+    mux_audio_into_video,
+    plan_scene_batch,
+    generate_icons_for_segment,
+    build_clip_from_scene,
+)
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("MAIN")
 
-# ── Output directories ────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
 DIR_AUDIO = "output/audios"
 DIR_TRANSCRIPTS = "output/transcriptions"
 DIR_SEGMENTS = "output/segments"
 DIR_VIDEOS = "output/videos"
-DIR_ICONS = "assets/icons"
 
-BATCH_SIZE = 5  # sentences per scene-plan request
-FPS = 30
+SCENE_PLAN_BATCH_SIZE = 20  # sentences per AI scene-planning batch
+VIDEO_FPS = 30
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Segment processor
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _ensure_dirs():
-    for d in (DIR_AUDIO, DIR_TRANSCRIPTS, DIR_SEGMENTS, DIR_VIDEOS, DIR_ICONS):
-        os.makedirs(d, exist_ok=True)
-
-
-def _cleanup_intermediates():
-    """Delete everything except the final video directory."""
-    for path in (DIR_AUDIO, DIR_TRANSCRIPTS, DIR_SEGMENTS, DIR_ICONS):
-        if os.path.exists(path):
-            shutil.rmtree(path)
-            logger.info(f"🗑️  Removed: {path}")
-
-
-def _resolve_animation_desc(fn_name: str, params: dict):
+async def process_segment(seg: dict, asset_fetcher) -> str | None:
     """
-    Turn an animation fn name (e.g. 'fade_in_desc') and its params dict
-    into a real AnimationDescriptor by calling the factory from animations.py.
+    Async. Full pipeline for one segment: audio → transcribe → plan → fetch/generate → render → mux.
+
+    Args:
+        seg:           Segment dict with "segment_title" and "segment_text".
+        asset_engine: Shared AssetEngine instance.
+
+    Returns:
+        Path to the finished segment .mp4, or None if any critical step failed.
     """
-    from core import (
-        fade_in_desc,
-        fade_out_desc,
-        pop_desc,
-        pop_out_desc,
-        bounce_desc,
-        bounce_out_desc,
-        elastic_scale_desc,
-        slide_in_from_left_desc,
-        slide_out_to_left_desc,
-        slide_in_from_right_desc,
-        slide_out_to_right_desc,
-        slide_in_from_bottom_desc,
-        slide_out_to_bottom_desc,
+    from core import render_all_scenes_parallel, generate_audio, transcribe_segment
+
+    title = seg["segment_title"]
+    text = seg["segment_text"]
+    safe_title = title.replace(" ", "_").replace("/", "-")
+    audio_path = os.path.join(DIR_AUDIO, f"{safe_title}.wav")
+    loop = asyncio.get_event_loop()
+
+    logger.info(f"\n{'='*60}\n🗂️  Processing segment: {title}\n{'='*60}")
+
+    # ── Step 1: Generate narration audio ──────────────────────────────────────
+    await generate_audio(text, safe_title)
+    if not os.path.exists(audio_path):
+        logger.error(f"❌ Audio not found after generation: {audio_path} — skipping")
+        return None
+
+    # ── Step 2: Transcribe → timed sentences ──────────────────────────────────
+    transcription = await transcribe_segment(audio_path, safe_title)
+    if not transcription:
+        logger.error(f"❌ Transcription failed for '{title}' — skipping")
+        return None
+
+    sentences = transcription["sentences"]
+    sentence_texts = [s["text"] for s in sentences]
+    audio_duration = get_audio_duration_ms(audio_path)
+    logger.info(
+        f"🔤 {len(sentences)} sentences | 🎵 {audio_duration / 1000:.2f}s audio"
     )
 
-    registry = {
-        "fade_in_desc": fade_in_desc,
-        "fade_out_desc": fade_out_desc,
-        "pop_desc": pop_desc,
-        "pop_out_desc": pop_out_desc,
-        "bounce_desc": bounce_desc,
-        "bounce_out_desc": bounce_out_desc,
-        "elastic_scale_desc": elastic_scale_desc,
-        "slide_in_from_left_desc": slide_in_from_left_desc,
-        "slide_out_to_left_desc": slide_out_to_left_desc,
-        "slide_in_from_right_desc": slide_in_from_right_desc,
-        "slide_out_to_right_desc": slide_out_to_right_desc,
-        "slide_in_from_bottom_desc": slide_in_from_bottom_desc,
-        "slide_out_to_bottom_desc": slide_out_to_bottom_desc,
-    }
+    # ── Step 3: Plan scenes (batched, all batches concurrent) ─────────────────
+    # The director now returns asset_type + style_tag per concept — no second
+    # LLM call is needed in the asset layer.
+    batches = [
+        sentences[i : i + SCENE_PLAN_BATCH_SIZE]
+        for i in range(0, len(sentences), SCENE_PLAN_BATCH_SIZE)
+    ]
+    logger.info(f"🤖 Planning scenes — {len(batches)} batch(es)...")
 
-    factory = registry.get(fn_name)
-    if factory is None:
-        logger.warning(
-            f"⚠️  Unknown animation fn '{fn_name}' — falling back to fade_in_desc"
-        )
-        return fade_in_desc()
+    batch_results = await asyncio.gather(
+        *[
+            loop.run_in_executor(
+                None,
+                plan_scene_batch,
+                batch,
+                sentence_texts,
+                audio_path,
+                idx,
+                len(batches),
+            )
+            for idx, batch in enumerate(batches)
+        ],
+        return_exceptions=True,
+    )
 
-    try:
-        return factory(**params) if params else factory()
-    except TypeError as e:
-        logger.warning(f"⚠️  Bad params for '{fn_name}': {e} — using defaults")
-        return factory()
-
-
-def _build_effect_entries(effects: list) -> list:
-    """
-    Convert the JSON effect list (plain strings or [fn, start_t] arrays)
-    into the EffectEntry format expected by build_effect_curves().
-    Plain string  → "shake"
-    Two-item list → ("shake", 1.5)
-    """
-    out = []
-    for entry in effects or []:
-        if isinstance(entry, str):
-            out.append(entry)
-        elif isinstance(entry, list) and len(entry) == 2:
-            out.append((entry[0], float(entry[1])))
+    all_scenes = []
+    for result in batch_results:
+        if isinstance(result, Exception):
+            logger.warning(f"⚠️  Scene planning batch failed: {result}")
         else:
-            logger.warning(f"⚠️  Skipping malformed effect entry: {entry}")
-    return out
+            all_scenes.extend(result)
 
+    if not all_scenes:
+        logger.error(f"❌ No scenes produced for '{title}' — skipping")
+        return None
+    logger.info(f"🗺️  {len(all_scenes)} scenes planned")
 
-def _slot_anim(scene: dict, slot: str, key: str, fallback: str) -> str:
-    """Return per-slot animation override or fall back to the top-level value."""
-    overrides = scene.get("slot_animations", {})
-    return overrides.get(slot, {}).get(key) or scene.get(fallback, "")
+    # ── Step 4: Fetch or generate icons for all scenes ─────────────────────────
+    await generate_icons_for_segment(all_scenes, asset_fetcher)
 
-
-def _build_scene_clip(scene: dict):
-    """
-    Translate one scene dict from the AI plan into a MoviePy clip
-    by calling the appropriate layout function.
-    """
-    from core import (
-        create_center_scene,
-        create_side_by_side_scene,
-        create_split_comparison_scene,
-        create_progressive_icons_scene,
-        create_center_with_support_scene,
+    # ── Step 5: Build MoviePy clips (concurrent, sync work offloaded) ─────────
+    clip_results = await asyncio.gather(
+        *[
+            loop.run_in_executor(None, build_clip_from_scene, scene)
+            for scene in all_scenes
+        ],
+        return_exceptions=True,
     )
 
-    layout = scene.get("layout", "create_center_scene")
-    duration = int(scene.get("duration", 4))
-    elements = scene.get("elements", [])
+    scene_clips = []
+    for result in clip_results:
+        if isinstance(result, Exception):
+            logger.warning(f"⚠️  Clip build exception: {result}")
+        elif result is not None:
+            scene_clips.append(result)
 
-    # ── Build a quick element lookup by slot name ─────────────────────────────
-    by_slot = {}
-    for el in elements:
-        slot = el.get("slot", "")
-        by_slot[slot] = el
+    if not scene_clips:
+        logger.error(f"❌ No clips built for '{title}' — skipping render")
+        return None
+    logger.info(f"🎞️  {len(scene_clips)} clips ready to render")
 
-    def icon(slot: str) -> str:
-        """Return the local icon path for a slot, with a clear error if missing."""
-        el = by_slot.get(slot, {})
-        path = el.get("local_path", "")
-        if not path:
-            logger.error(
-                f"❌ No local_path for slot '{slot}' in scene {scene.get('sentence_id')}"
-            )
-        return path
+    # ── Step 6: Render clips → silent video ───────────────────────────────────
+    silent_video_path = os.path.join(DIR_SEGMENTS, f"{safe_title}_silent.mp4")
+    await loop.run_in_executor(
+        None,
+        lambda: render_all_scenes_parallel(
+            scene_clips=scene_clips,
+            final_output_path=silent_video_path,
+            fps=VIDEO_FPS,
+            max_workers=8,
+            temp_dir=DIR_SEGMENTS,
+        ),
+    )
 
-    def effects(slot: str) -> list:
-        return _build_effect_entries(by_slot.get(slot, {}).get("effects", []))
+    if not os.path.exists(silent_video_path):
+        logger.error(f"❌ Silent video not found after render: {silent_video_path}")
+        return None
 
-    def anim_in(slot: str) -> object:
-        fn = _slot_anim(scene, slot, "animate_in", "animate_in")
-        params = {}
-        return _resolve_animation_desc(fn, params)
+    log_segment_duration_diff(title, audio_duration, silent_video_path)
 
-    def anim_out(slot: str) -> object:
-        fn = _slot_anim(scene, slot, "animate_out", "animate_out")
-        params = {}
-        return _resolve_animation_desc(fn, params)
+    # ── Step 7: Mux narration audio into silent video ─────────────────────────
+    segment_video_path = os.path.join(DIR_SEGMENTS, f"{safe_title}.mp4")
+    await loop.run_in_executor(
+        None,
+        lambda: mux_audio_into_video(silent_video_path, audio_path, segment_video_path),
+    )
 
-    # ── Dispatch to the right layout ─────────────────────────────────────────
-    if layout == "create_center_scene":
-        return create_center_scene(
-            icon_path=icon("icon_path"),
-            animate_in=anim_in("icon_path"),
-            animate_out=anim_out("icon_path"),
-            effects=effects("icon_path"),
-            duration=duration,
-        )
+    if not os.path.exists(segment_video_path):
+        logger.error(f"❌ Segment video not found after mux: {segment_video_path}")
+        return None
 
-    if layout == "create_side_by_side_scene":
-        return create_side_by_side_scene(
-            left_icon=icon("left_icon"),
-            right_icon=icon("right_icon"),
-            animate_left_in=anim_in("left_icon"),
-            animate_left_out=anim_out("left_icon"),
-            animate_right_in=anim_in("right_icon"),
-            animate_right_out=anim_out("right_icon"),
-            effects_left=effects("left_icon"),
-            effects_right=effects("right_icon"),
-            duration=duration,
-        )
-
-    if layout == "create_split_comparison_scene":
-        return create_split_comparison_scene(
-            left_icon=icon("left_icon"),
-            right_icon=icon("right_icon"),
-            animate_left_in=anim_in("left_icon"),
-            animate_left_out=anim_out("left_icon"),
-            animate_right_in=anim_in("right_icon"),
-            animate_right_out=anim_out("right_icon"),
-            animate_divider_in=_resolve_animation_desc(
-                scene.get("animate_in", "fade_in_desc"), {}
-            ),
-            animate_divider_out=_resolve_animation_desc(
-                scene.get("animate_out", "fade_out_desc"), {}
-            ),
-            effects_left=effects("left_icon"),
-            effects_right=effects("right_icon"),
-            duration=duration,
-        )
-
-    if layout == "create_progressive_icons_scene":
-        el = by_slot.get("icon_list", {})
-        paths = el.get("local_paths", [])  # list of paths for list slots
-        if not paths:
-            paths = [el.get("local_path", "")] if el.get("local_path") else []
-        return create_progressive_icons_scene(
-            icon_list=paths,
-            animate_each_in=anim_in("icon_list"),
-            animate_each_out=anim_out("icon_list"),
-            effects_each=effects("icon_list"),
-            duration=duration,
-        )
-
-    if layout == "create_center_with_support_scene":
-        support_el = by_slot.get("support_icons", {})
-        support_paths = support_el.get("local_paths", [])
-        if not support_paths:
-            support_paths = (
-                [support_el.get("local_path", "")]
-                if support_el.get("local_path")
-                else []
-            )
-        return create_center_with_support_scene(
-            main_icon=icon("main_icon"),
-            support_icons=support_paths,
-            animate_main_in=anim_in("main_icon"),
-            animate_main_out=anim_out("main_icon"),
-            animate_support_in=anim_in("support_icons"),
-            animate_support_out=anim_out("support_icons"),
-            effects_main=effects("main_icon"),
-            effects_support=effects("support_icons"),
-            duration=duration,
-        )
-
-    logger.error(f"❌ Unknown layout '{layout}' — skipping scene")
-    return None
+    logger.info(f"✅ Segment complete: {segment_video_path}")
+    return segment_video_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,202 +180,74 @@ def _build_scene_clip(scene: dict):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def main():
+async def main():
     from core import (
-        FREEPIK_API_KEY,
         semantic_segmentation,
-        transcribe_segment,
-        generate_audio,
-        generate_scene_plan,
-        VectorRetrievalEngine,
+        stitch_with_ffmpeg,
+        stitch_with_moviepy,
     )
-    from core import render_all_scenes_parallel
+    from core import AssetEngine
 
-    _ensure_dirs()
+    ensure_output_dirs(DIR_AUDIO, DIR_TRANSCRIPTS, DIR_SEGMENTS, DIR_VIDEOS)
 
-    vector_engine = VectorRetrievalEngine(api_key=FREEPIK_API_KEY)
-    segment_videos = []  # final ordered list of per-segment .mp4 paths
-
-    # ── 1. Segment the script ─────────────────────────────────────────────────
+    # ── Split the script into thematic segments ───────────────────────────────
     logger.info("✂️  Segmenting script...")
-    segmented = semantic_segmentation(script, script_length=len(script))
-    logger.info(f"📦 {len(segmented)} segments produced")
+    segments = semantic_segmentation(script, script_length=len(script))
+    video_title = re.sub(r"_\d+$", "", segments[0]["segment_title"])
+    logger.info(f"📦 {len(segments)} segments to process")
 
-    # ── 2. Process each segment ───────────────────────────────────────────────
-    for seg in segmented:
-        seg_title = seg["segment_title"]
-        seg_text = seg["segment_text"]
-        safe_title = seg_title.replace(" ", "_").replace("/", "-")
+    # ── Process all segments sequentially (one at a time, in order) ──────────
+    # Sequential processing avoids overwhelming external APIs and keeps
+    # memory usage predictable — each segment fully completes before the next.
+    logger.info(f"🚀 Running {len(segments)} segments sequentially...")
+    segment_videos = []
+    async with AssetEngine() as asset_engine:
+        for idx, seg in enumerate(segments, 1):
+            logger.info(f"▶️  Segment {idx}/{len(segments)}: '{seg['segment_title']}'")
+            try:
+                result = await process_segment(seg, asset_engine)
+            except Exception as exc:
+                logger.warning(f"⚠️  Segment '{seg['segment_title']}' raised: {exc}")
+                result = None
 
-        logger.info(f"\n{'='*60}")
-        logger.info(f"{'='*60}")
-
-        # ── 2a. Generate audio ────────────────────────────────────────────────
-        generate_audio(seg_text, safe_title)
-        audio_path = os.path.join(DIR_AUDIO, f"{safe_title}.mp3")
-        if not os.path.exists(audio_path):
-            logger.error(
-                f"❌ Audio generation failed for segment {seg_title} — skipping"
-            )
-            continue
-
-        # ── 2b. Transcribe → timed sentences ─────────────────────────────────
-        transcription = transcribe_segment(audio_path, safe_title)
-        if not transcription:
-            logger.error(f"❌ Transcription failed for segment {seg_title} — skipping")
-            continue
-
-        sentences = transcription["sentences"]
-        context = [s["text"] for s in sentences]
-        logger.info(f"🔤 {len(sentences)} sentences transcribed")
-
-        # ── 2c. Scene planning in batches of BATCH_SIZE ───────────────────────
-        all_scenes = []
-        batches = [
-            sentences[i : i + BATCH_SIZE] for i in range(0, len(sentences), BATCH_SIZE)
-        ]
-
-        for batch_idx, batch in enumerate(batches):
-            logger.info(
-                f"🤖 Planning batch {batch_idx + 1}/{len(batches)} ({len(batch)} sentences)"
-            )
-            plan = generate_scene_plan(
-                batch_sentences=batch,
-                full_context_sentences=context,
-            )
-            all_scenes.extend(plan.get("scenes", []))
-
-        logger.info(f"🗺️  Total scenes planned: {len(all_scenes)}")
-
-        # ── 2d. Fetch icons for every element ─────────────────────────────────
-        for scene in all_scenes:
-            for element in scene.get("elements", []):
-                query = element.get("search_query", "")
-                if not query:
-                    continue
-
-                slot = element.get("slot", "")
-
-                # List-type slots (icon_list / support_icons) may need multiple icons
-                if slot in ("icon_list", "support_icons"):
-                    concepts = element.get("concepts", [element.get("concept", query)])
-                    queries = element.get(
-                        "search_queries", [element.get("search_query", query)]
-                    )
-                    paths = []
-                    for q in queries:
-                        result = vector_engine.get_black_assets(q, count=1)
-                        if result:
-                            paths.append(result[0])
-                            logger.info(f"✅ Icon fetched: {q}")
-                        else:
-                            logger.warning(f"⚠️  No icon found for '{q}'")
-                    element["local_paths"] = paths
-                else:
-                    result = vector_engine.get_black_assets(query, count=1)
-                    if result:
-                        element["local_path"] = result[0]
-                        logger.info(f"✅ Icon fetched: {query} → {result[0]}")
-                    else:
-                        logger.warning(f"⚠️  No icon found for '{query}'")
-
-        # ── 2e. Build MoviePy clips ───────────────────────────────────────────
-        scene_clips = []
-        for scene in all_scenes:
-            clip = _build_scene_clip(scene)
-            if clip is not None:
-                scene_clips.append(clip)
-            else:
+            if result is None:
                 logger.warning(
-                    f"⚠️  Scene {scene.get('sentence_id')} produced no clip — skipped"
+                    f"⚠️  Segment '{seg['segment_title']}' failed — will be missing from final video"
                 )
+            else:
+                segment_videos.append(result)
 
-        if not scene_clips:
-            logger.error(f"❌ No clips built for segment {seg_title} — skipping render")
-            continue
-
-        logger.info(f"🎞️  {len(scene_clips)} clips ready for rendering")
-
-        # ── 2f. Render segment video (silent) ────────────────────────────────
-        silent_video_path = os.path.join(DIR_SEGMENTS, f"{safe_title}_silent.mp4")
-        render_all_scenes_parallel(
-            scene_clips=scene_clips,
-            final_output_path=silent_video_path,
-            fps=FPS,
-            max_workers=4,
-            temp_dir=DIR_SEGMENTS,
-        )
-
-        if not os.path.exists(silent_video_path):
-            logger.error(f"❌ Silent video not found after render: {silent_video_path}")
-            continue
-
-        # ── 2g. Mux audio into segment video ─────────────────────────────────
-        seg_video_path = os.path.join(DIR_SEGMENTS, f"{safe_title}.mp4")
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    silent_video_path,
-                    "-i",
-                    audio_path,
-                    "-c:v",
-                    "copy",
-                    "-c:a",
-                    "aac",
-                    "-shortest",
-                    seg_video_path,
-                ],
-                check=True,
-                capture_output=True,
-            )
-            os.remove(silent_video_path)
-            logger.info(f"✅ Audio muxed into segment video: {seg_video_path}")
-        except subprocess.CalledProcessError as e:
-            logger.error(
-                f"❌ FFmpeg mux failed for segment {seg_title}: {e.stderr.decode()}"
-            )
-            os.rename(silent_video_path, seg_video_path)
-            logger.warning("⚠️  Falling back to silent segment video")
-
-        if os.path.exists(seg_video_path):
-            segment_videos.append(seg_video_path)
-            logger.info(f"✅ Segment video saved: {seg_video_path}")
-        else:
-            logger.error(f"❌ Segment video not found after mux: {seg_video_path}")
-
-    # ── 3. Stitch all segments into final video ───────────────────────────────
     if not segment_videos:
-        logger.error("❌ No segment videos produced — aborting final stitch")
+        logger.error("❌ No segment videos produced — aborting")
         return
 
-    logger.info(f"\n{'='*60}")
-    logger.info(f"🎬 Stitching {len(segment_videos)} segments into final video")
-    logger.info(f"{'='*60}")
-
-    final_video_path = os.path.join(DIR_VIDEOS, "final.mp4")
-
-    from core import stitch_with_ffmpeg, stitch_with_moviepy
+    # ── Stitch all segments into the final video ──────────────────────────────
+    logger.info(
+        f"\n{'='*60}\n🎬 Stitching {len(segment_videos)} segment(s)...\n{'='*60}"
+    )
+    final_video_path = os.path.join(DIR_VIDEOS, f"{video_title}.mp4")
+    loop = asyncio.get_event_loop()
 
     try:
-        stitch_with_ffmpeg(segment_videos, final_video_path)
+        await loop.run_in_executor(
+            None, lambda: stitch_with_ffmpeg(segment_videos, final_video_path)
+        )
     except Exception as e:
-        logger.warning(f"⚠️  FFmpeg stitch failed: {e} — falling back to MoviePy")
-        stitch_with_moviepy(segment_videos, final_video_path, FPS)
+        logger.warning(f"⚠️  FFmpeg stitch failed ({e}) — falling back to MoviePy")
+        await loop.run_in_executor(
+            None,
+            lambda: stitch_with_moviepy(segment_videos, final_video_path, VIDEO_FPS),
+        )
 
-    if os.path.exists(final_video_path):
-        logger.info(f"🏁 Final video ready: {final_video_path}")
-    else:
+    if not os.path.exists(final_video_path):
         logger.error("❌ Final video not found after stitch")
         return
 
-    # ── 4. Cleanup ────────────────────────────────────────────────────────────
-    logger.info("🧹 Cleaning up intermediates...")
-    _cleanup_intermediates()
-    logger.info("✅ Done. Only the final video remains.")
+    logger.info(f"🏁 Final video ready: {final_video_path}")
+
+    # cleanup_intermediate_dirs(DIR_AUDIO, DIR_TRANSCRIPTS, DIR_SEGMENTS, DIR_ICONS)
+    logger.info("✅ Pipeline complete.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

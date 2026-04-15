@@ -170,3 +170,26 @@ def semantic_segmentation(
     logger.info("✨ Output formatting complete")
 
     return formatted_output
+
+if __name__ == "__main__":
+    script = """
+The Secret Way Talking to Yourself Can Make You a Genius
+
+Talking to yourself…
+…might be the reason…
+…you’re failing.
+Not because you do it…
+…but because you’re doing it wrong.
+You’ve felt it…
+That moment when someone sees you…
+…and suddenly you think:
+“They think I’m crazy.”
+But what if I told you… that habit—the one that embarrasses you the most…
+…is actually one of the most powerful psychological tools you have?
+In the next few minutes, you’ll discover the one word…
+…that separates people who use self-talk to take control of their lives…
+…from those who are sabotaging themselves without even realizing it.
+"""
+    result = semantic_segmentation(script=script, script_length=len(script))
+
+    print(result)

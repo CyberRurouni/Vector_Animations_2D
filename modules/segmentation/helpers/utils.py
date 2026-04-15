@@ -16,5 +16,6 @@ def format_segments(result: Dict[str, Any]) -> List[Dict[str, str]]:
         formatted_segments.append(
             {"segment_title": f"{title}_{seg_id}", "segment_text": seg_text}
         )
+    
 
     return formatted_segments

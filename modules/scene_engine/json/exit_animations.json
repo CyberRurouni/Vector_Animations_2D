@@ -1,0 +1,108 @@
+{
+    "exit_animations": [
+        {
+            "name": "fade_out",
+            "category": "subtle",
+            "energy_level": "low",
+            "description": "Smooth fade-out with slight scale-down (100% → 92%). Clean and minimal exit.",
+            "use_cases": [
+                "Calm endings",
+                "Professional tone",
+                "Non-distracting transitions",
+                "Default safe exit"
+            ]
+        },
+        {
+            "name": "pop_out",
+            "category": "scale",
+            "energy_level": "medium",
+            "description": "Shrinks from full size to zero with a slight pull-back before disappearing.",
+            "use_cases": [
+                "UI-style interactions",
+                "General-purpose exits",
+                "Ending highlighted elements cleanly"
+            ]
+        },
+        {
+            "name": "pop_in_out",
+            "category": "scale",
+            "energy_level": "high",
+            "description": "Briefly expands before collapsing to zero, creating a dramatic exit.",
+            "use_cases": [
+                "Hero elements exiting",
+                "Strong emphasis moments",
+                "Dramatic transitions"
+            ]
+        },
+        {
+            "name": "bounce_out",
+            "category": "physics",
+            "energy_level": "high",
+            "description": "Bounces slightly then launches upward off-screen with a physical feel.",
+            "use_cases": [
+                "Playful endings",
+                "Casual or fun content",
+                "Energetic scene transitions"
+            ]
+        },
+        {
+            "name": "elastic_scale_out",
+            "category": "scale",
+            "energy_level": "very_high",
+            "description": "Elastic compression before disappearing, creating a spring-like exit.",
+            "use_cases": [
+                "High-energy endings",
+                "Impactful transitions",
+                "Moments needing strong visual punch"
+            ],
+            "warnings": [
+                "Use sparingly to avoid visual fatigue",
+                "Not suitable for serious or calm scenes"
+            ]
+        },
+        {
+            "name": "slide_out_to_right",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides out toward the right edge with slight acceleration.",
+            "use_cases": [
+                "Directional storytelling",
+                "Ending left-origin elements",
+                "Maintaining motion continuity"
+            ]
+        },
+        {
+            "name": "slide_out_to_left",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides out toward the left edge.",
+            "use_cases": [
+                "Directional exits",
+                "Ending right-origin elements",
+                "Balanced motion design"
+            ]
+        },
+        {
+            "name": "slide_out_to_top",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides upward off-screen.",
+            "use_cases": [
+                "Upward motion continuation",
+                "Clearing elements vertically",
+                "Structured transitions"
+            ]
+        },
+        {
+            "name": "slide_out_to_bottom",
+            "category": "slide",
+            "energy_level": "medium",
+            "description": "Slides downward off-screen.",
+            "use_cases": [
+                "Downward motion continuation",
+                "Ending top-origin elements",
+                "Soft directional exits"
+            ]
+        }
+    ]
+}

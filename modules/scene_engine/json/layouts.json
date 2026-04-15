@@ -1,73 +1,210 @@
 {
     "layouts": [
         {
-            "fn": "create_center_scene",
-            "desc": "Single icon centred on canvas. For hero moments or any sentence with one core concept.",
-            "params": {
-                "icon_path": "str — path to PNG icon",
-                "animate_in": "entrance_fn — default fade_in_desc",
-                "animate_out": "exit_fn — default fade_out_desc",
-                "effects": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "duration": "int (seconds) — default 4"
-            }
+            "name": "create_center_scene",
+            "description": "A single icon displayed at the center of the screen with optional entry and exit animations.",
+            "slots": {
+                "main_icon": {
+                    "description": "The primary icon to be displayed in the scene.",
+                    "type": "icon"
+                }
+            },
+            "parameters": {
+                "duration": {
+                    "type": "int",
+                    "description": "Total duration of the scene in seconds."
+                },
+                "animate_in": {
+                    "type": "string",
+                    "description": "Entry animation for the icon."
+                },
+                "animate_out": {
+                    "type": "string",
+                    "description": "Exit animation for the icon."
+                }
+            },
+            "use_cases": [
+                "Introducing a concept",
+                "Highlighting a single key idea",
+                "Minimal or clean visual storytelling",
+                "Opening or closing shots"
+            ]
         },
         {
-            "fn": "create_side_by_side_scene",
-            "desc": "Two icons side by side. For pairs or soft comparisons. Left = negative/before, right = positive/after.",
-            "params": {
-                "left_icon": "str — path to left PNG",
-                "right_icon": "str — path to right PNG",
-                "animate_left_in": "entrance_fn — default fade_in_desc",
-                "animate_left_out": "exit_fn — default fade_out_desc",
-                "animate_right_in": "entrance_fn — default fade_in_desc",
-                "animate_right_out": "exit_fn — default fade_out_desc",
-                "effects_left": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "effects_right": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "duration": "int (seconds) — default 4"
-            }
+            "name": "create_side_by_side_scene",
+            "description": "Two icons displayed side by side for comparison or parallel ideas.",
+            "slots": {
+                "left_icon": {
+                    "description": "Icon displayed on the left side of the screen.",
+                    "type": "icon"
+                },
+                "right_icon": {
+                    "description": "Icon displayed on the right side of the screen.",
+                    "type": "icon"
+                }
+            },
+            "parameters": {
+                "duration": {
+                    "type": "int",
+                    "description": "Total duration of the scene."
+                },
+                "animate_left_in": {
+                    "type": "string",
+                    "description": "Entry animation for left icon."
+                },
+                "animate_left_out": {
+                    "type": "string",
+                    "description": "Exit animation for left icon."
+                },
+                "animate_right_in": {
+                    "type": "string",
+                    "description": "Entry animation for right icon."
+                },
+                "animate_right_out": {
+                    "type": "string",
+                    "description": "Exit animation for right icon."
+                }
+            },
+            "use_cases": [
+                "Comparisons (A vs B)",
+                "Before vs after",
+                "Contrasting ideas",
+                "Dual concepts explained simultaneously"
+            ]
         },
         {
-            "fn": "create_split_comparison_scene",
-            "desc": "Two icons split by a centre divider. For explicit A vs B contrast. Left = bad/wrong, right = good/correct.",
-            "params": {
-                "left_icon": "str — path to left PNG",
-                "right_icon": "str — path to right PNG",
-                "animate_left_in": "entrance_fn — default fade_in_desc",
-                "animate_left_out": "exit_fn — default fade_out_desc",
-                "animate_right_in": "entrance_fn — default fade_in_desc",
-                "animate_right_out": "exit_fn — default fade_out_desc",
-                "animate_divider_in": "entrance_fn — default fade_in_desc",
-                "animate_divider_out": "exit_fn — default fade_out_desc",
-                "effects_left": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "effects_right": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "duration": "int (seconds) — default 4"
-            }
+            "name": "create_split_comparison_scene",
+            "description": "Two icons separated by a vertical divider, emphasizing a strong contrast or competition.",
+            "slots": {
+                "left_icon": {
+                    "description": "Icon displayed on the left side of the screen.",
+                    "type": "icon"
+                },
+                "right_icon": {
+                    "description": "Icon displayed on the right side of the screen.",
+                    "type": "icon"
+                }
+            },
+            "parameters": {
+                "duration": {
+                    "type": "int",
+                    "description": "Scene duration."
+                },
+                "animate_left_in": {
+                    "type": "string",
+                    "description": "Entry animation for left icon."
+                },
+                "animate_left_out": {
+                    "type": "string",
+                    "description": "Exit animation for left icon."
+                },
+                "animate_right_in": {
+                    "type": "string",
+                    "description": "Entry animation for right icon."
+                },
+                "animate_right_out": {
+                    "type": "string",
+                    "description": "Exit animation for right icon."
+                }
+            },
+            "use_cases": [
+                "Debates or conflicts",
+                "Good vs bad",
+                "Feature comparisons",
+                "Head-to-head scenarios"
+            ]
         },
         {
-            "fn": "create_progressive_icons_scene",
-            "desc": "Up to 3 icons revealed one after another left to right with staggered delay. For steps, lists, or feature reveals.",
-            "params": {
-                "icon_list": "list[str] — up to 3 icon paths",
-                "animate_each_in": "entrance_fn — default fade_in_desc",
-                "animate_each_out": "exit_fn — default fade_out_desc",
-                "effects_each": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "duration": "int (seconds) — default 4"
-            }
+            "name": "create_progressive_icons_scene",
+            "description": "Up to three icons appear sequentially with delays, useful for step-by-step or progressive storytelling.",
+            "slots": {
+                "icon_1": {
+                    "description": "First icon to appear in the sequence.",
+                    "type": "icon"
+                },
+                "icon_2": {
+                    "description": "Second icon to appear in the sequence.",
+                    "type": "icon"
+                },
+                "icon_3": {
+                    "description": "Third icon to appear in the sequence.",
+                    "type": "icon"
+                }
+            },
+            "parameters": {
+                "duration": {
+                    "type": "int",
+                    "description": "Total duration."
+                },
+                "animate_each_in": {
+                    "type": "string",
+                    "description": "Entry animation applied to all icons."
+                },
+                "animate_each_out": {
+                    "type": "string",
+                    "description": "Exit animation applied to all icons."
+                }
+            },
+            "use_cases": [
+                "Step-by-step explanation",
+                "Listing items",
+                "Sequential storytelling",
+                "Cause → effect → result"
+            ]
         },
         {
-            "fn": "create_center_with_support_scene",
-            "desc": "One large central icon surrounded by smaller support icons in orbit. For ecosystems, hub-and-spoke, or a main concept with related features.",
-            "params": {
-                "main_icon": "str — path to main PNG",
-                "support_icons": "list[str] — paths to support PNGs",
-                "animate_main_in": "entrance_fn — default fade_in_desc",
-                "animate_main_out": "exit_fn — default fade_out_desc",
-                "animate_support_in": "entrance_fn — default fade_in_desc",
-                "animate_support_out": "exit_fn — default fade_out_desc",
-                "effects_main": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "effects_support": "list[effect_entry] - Examples: ['pulse'] [('pulse', 1.0)] first is name and second is when should it take place — default []",
-                "duration": "int (seconds) — default 4"
-            }
+            "name": "create_center_with_support_scene",
+            "description": "A main central icon supported by multiple smaller icons arranged around it, showing relationships or ecosystems.",
+            "slots": {
+                "main_icon": {
+                    "description": "The primary icon at the center.",
+                    "type": "icon"
+                },
+                "support_icon_1": {
+                    "description": "First supporting icon around the main icon.",
+                    "type": "icon"
+                },
+                "support_icon_2": {
+                    "description": "Second supporting icon around the main icon.",
+                    "type": "icon"
+                },
+                "support_icon_3": {
+                    "description": "Third supporting icon around the main icon.",
+                    "type": "icon"
+                },
+                "...": {
+                    "description": "Additional supporting icons can be added as needed.",
+                    "type": "icon"
+                }
+            },
+            "parameters": {
+                "duration": {
+                    "type": "int",
+                    "description": "Scene duration."
+                },
+                "animate_main_in": {
+                    "type": "string",
+                    "description": "Entry animation for main icon."
+                },
+                "animate_main_out": {
+                    "type": "string",
+                    "description": "Exit animation for main icon."
+                },
+                "animate_support_in": {
+                    "type": "string",
+                    "description": "Entry animation for support icons."
+                },
+                "animate_support_out": {
+                    "type": "string",
+                    "description": "Exit animation for support icons."
+                }
+            },
+            "use_cases": [
+                "Core idea with supporting elements",
+                "Ecosystem or network visualization",
+                "Main feature with sub-features",
+                "Hub-and-spoke storytelling"
+            ]
         }
     ]
 }

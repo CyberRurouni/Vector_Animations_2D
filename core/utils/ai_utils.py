@@ -77,13 +77,13 @@ def call_openai_robust(
         ValueError: If JSON parsing fails after all retries
         RuntimeError: If API call fails after all retries
     """
-    from core import openai_client  # Avoid circular import
+    from core import openrouter_client  # Avoid circular import
 
     last_error = None
     
     for attempt in range(max_retries):
         try:
-            resp = openai_client.chat.completions.create(
+            resp = openrouter_client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
