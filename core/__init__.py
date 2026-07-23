@@ -34,21 +34,23 @@ from modules.audio.audio import generate_audio
 # --- Transcription ----
 from modules.transcription.transcribe import transcribe_segment
 
-# --- Vector Retrieval ----
-from modules.vector_retrieval.retrieval_engine import VectorRetrievalEngine
-
-# --- Icon Generator ----
+# --- Asset Generator ----
 from modules.asset_engine.asset_engine import AssetEngine
 from modules.asset_engine.utils.general import generate_embeddings
 
 # --- Scene Engine ----
-from modules.scene_engine.director import generate_scene_plan
+from modules.scene_engine.director.components.scene_planner import SCENE_PLANNER_SYSTEM_PROMPT, plan_segment_scenes, _apply_scene_timestamps
+from modules.scene_engine.director.components.choreographer import CHOREOGRAPHER_SYSTEM_PROMPT, choreograph_scenes
+from modules.scene_engine.director.components.assets_planner import ASSET_PLANNER_SYSTEM_PROMPT, plan_assets
+from modules.scene_engine.director.components.components_summarizer import summarize_component_prompt
+from modules.scene_engine.director.director import direct_segment
 
 # --- Scene Utils ---
 from modules.scene_engine.utils.scene_utils import (
     render_all_scenes_parallel,
     stitch_with_ffmpeg,
     stitch_with_moviepy,
+    _load_reference_json,
 )
 
 # --- Animations ----

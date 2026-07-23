@@ -15,8 +15,16 @@ Your tasks:
 - Divide the lines into semantically complete segments
 - Each segment must represent ONE complete idea or thematic block
 - NEVER split mid-sentence or mid-idea
-- Segments must be contiguous: end_line of segment N + 1 == start_line of segment N+1
-- start_line of the first segment MUST be 1
+- The first segment's start_line MUST be exactly (last_covered_line + 1)
+- Segments MUST be strictly contiguous and non-overlapping:
+    start_line of segment N+1 MUST equal (end_line of segment N) + 1
+- NEVER output a start_line or end_line that is <= last_covered_line —
+  those lines are already covered and must not reappear in any segment
+- Before outputting, verify every segment's start_line is exactly
+  one greater than the previous segment's end_line (or last_covered_line
+  for the first segment) — fix any boundary that fails this check
+- All line numbers MUST be within [1, total_lines] (relative to this chunk's
+  own numbering as shown in Text)
 - All line numbers MUST be within [1, total_lines]
 
 --- MINIMUM SEGMENT SIZE ---

@@ -11,6 +11,7 @@ from .utils import (
     log_segment_duration_diff,
     mux_audio_into_video,
     plan_scene_batch,
+    apply_scene_timestamps,
     generate_icons_for_segment,
     build_clip_from_scene,
 )
@@ -31,7 +32,7 @@ DIR_TRANSCRIPTS = "output/transcriptions"
 DIR_SEGMENTS = "output/segments"
 DIR_VIDEOS = "output/videos"
 
-SCENE_PLAN_BATCH_SIZE = 20  # sentences per AI scene-planning batch
+SCENE_PLAN_BATCH_SIZE = 50  # words per AI scene planning batch
 VIDEO_FPS = 30
 
 
@@ -54,7 +55,7 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
     from core import render_all_scenes_parallel, generate_audio, transcribe_segment
 
     title = seg["segment_title"]
-    text = seg["segment_text"]
+    segment_text = seg["segment_text"]
     safe_title = title.replace(" ", "_").replace("/", "-")
     audio_path = os.path.join(DIR_AUDIO, f"{safe_title}.wav")
     loop = asyncio.get_event_loop()
@@ -62,7 +63,7 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
     logger.info(f"\n{'='*60}\n🗂️  Processing segment: {title}\n{'='*60}")
 
     # ── Step 1: Generate narration audio ──────────────────────────────────────
-    await generate_audio(text, safe_title)
+    await generate_audio(segment_text, safe_title)
     if not os.path.exists(audio_path):
         logger.error(f"❌ Audio not found after generation: {audio_path} — skipping")
         return None
@@ -73,19 +74,18 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
         logger.error(f"❌ Transcription failed for '{title}' — skipping")
         return None
 
-    sentences = transcription["sentences"]
-    sentence_texts = [s["text"] for s in sentences]
+    word_by_word_transcription_data = transcription["word_by_word_transcription_data"]
     audio_duration = get_audio_duration_ms(audio_path)
     logger.info(
-        f"🔤 {len(sentences)} sentences | 🎵 {audio_duration / 1000:.2f}s audio"
+        f"🔤 {len(word_by_word_transcription_data)} word_by_word_transcription_data | 🎵 {audio_duration / 1000:.2f}s audio"
     )
 
     # ── Step 3: Plan scenes (batched, all batches concurrent) ─────────────────
     # The director now returns asset_type + style_tag per concept — no second
     # LLM call is needed in the asset layer.
     batches = [
-        sentences[i : i + SCENE_PLAN_BATCH_SIZE]
-        for i in range(0, len(sentences), SCENE_PLAN_BATCH_SIZE)
+        word_by_word_transcription_data[i : i + SCENE_PLAN_BATCH_SIZE]
+        for i in range(0, len(word_by_word_transcription_data), SCENE_PLAN_BATCH_SIZE)
     ]
     logger.info(f"🤖 Planning scenes — {len(batches)} batch(es)...")
 
@@ -95,7 +95,7 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
                 None,
                 plan_scene_batch,
                 batch,
-                sentence_texts,
+                segment_text,
                 audio_path,
                 idx,
                 len(batches),
@@ -116,6 +116,12 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
         logger.error(f"❌ No scenes produced for '{title}' — skipping")
         return None
     logger.info(f"🗺️  {len(all_scenes)} scenes planned")
+
+    # ── Stamp timestamps onto all scenes ──
+    # IMPORTANCE:
+      # Ensure First Scene always starts from 0ms
+      # Strech last scene to match audio's duration
+    apply_scene_timestamps(all_scenes, word_by_word_transcription_data, audio_path, VIDEO_FPS)
 
     # ── Step 4: Fetch or generate icons for all scenes ─────────────────────────
     await generate_icons_for_segment(all_scenes, asset_fetcher)
@@ -158,8 +164,6 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
         logger.error(f"❌ Silent video not found after render: {silent_video_path}")
         return None
 
-    log_segment_duration_diff(title, audio_duration, silent_video_path)
-
     # ── Step 7: Mux narration audio into silent video ─────────────────────────
     segment_video_path = os.path.join(DIR_SEGMENTS, f"{safe_title}.mp4")
     await loop.run_in_executor(
@@ -172,6 +176,7 @@ async def process_segment(seg: dict, asset_fetcher) -> str | None:
         return None
 
     logger.info(f"✅ Segment complete: {segment_video_path}")
+    log_segment_duration_diff(title, audio_duration, segment_video_path)
     return segment_video_path
 
 

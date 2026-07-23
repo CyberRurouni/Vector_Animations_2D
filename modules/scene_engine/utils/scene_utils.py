@@ -4,25 +4,28 @@ import logging
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, Dict, Tuple, Any
 from moviepy import VideoFileClip, concatenate_videoclips
 
 logger = logging.getLogger("SCENE_UTILS")
 
 
 # ----------------------------
-# Load reference JSONs (layouts, entry_animations, exit_animations)
+# Load reference JSONs (layouts, entry_animations, exit_animations, etc.)
 # ----------------------------
-def _load_reference_json(filename: str) -> dict:
+def _load_reference_json(relative_path: str) -> dict:
     from core import PROJECT_ROOT
 
-    path = os.path.join(PROJECT_ROOT, "modules", "scene_engine", "json", filename)
+    # 1. Extract the filename safely from the path string
+    filename = os.path.basename(relative_path)
+    
+    # 2. Build the full path
+    path = os.path.join(PROJECT_ROOT, relative_path)
 
     try:
         with open(path, "r") as f:
             data = json.load(f)
         logger.info(f"✅ Loaded reference JSON: {filename}")
-        return data or {}  # ensure dict even if JSON is empty
+        return data or {}  
     except FileNotFoundError:
         logger.error(f"🔥 Reference JSON not found: {filename}")
     except json.JSONDecodeError as e:
@@ -30,7 +33,8 @@ def _load_reference_json(filename: str) -> dict:
     except Exception as e:
         logger.error(f"🔥 Unexpected error loading {filename}: {e}", exc_info=True)
 
-    return {}  # always return a dict
+    return {}  
+
 
 
 # ----------------------------

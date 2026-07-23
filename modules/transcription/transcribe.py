@@ -35,7 +35,7 @@ async def transcribe_segment(audio_file: str, segment: str) -> dict | None:
     Returns:
         dict with keys:
           - "srt_path":       path to the exported .srt subtitle file
-          - "sentences_path": path to the saved sentences JSON
+          - "word_by_word_trancription_json_path": path to the saved sentences JSON
           - "sentences":      list of sentence dicts (id, text, start_ms, end_ms)
         Or None if all retries failed.
     """
@@ -62,40 +62,42 @@ async def transcribe_segment(audio_file: str, segment: str) -> dict | None:
             # 10-30s+, so we must not block the event loop.
             transcript = await loop.run_in_executor(None, _do_transcribe, audio_file)
 
+            logger.info(f"✅ Checking Transcript: {transcript}")
+
             if transcript.status == aai.TranscriptStatus.error:
                 raise RuntimeError(f"AssemblyAI error: {transcript.error}")
 
             # ── Build output paths ────────────────────────────────────────────
-            srt_path = f"output/transcriptions/{segment}.srt"
-            sentences_path = f"output/transcriptions/{segment}.json"
+            word_by_word_trancription_json_path = f"output/transcriptions/{segment}.json"
 
-            # ── Export SRT ────────────────────────────────────────────────────
-            srt_content = transcript.export_subtitles_srt()
-            await loop.run_in_executor(None, _write_text, srt_path, srt_content)
-            logger.info(f"📝 SRT saved: {srt_path}")
+            # ── Export word-level JSON ────────────────────────────────────────
+            # Each word gets its own timed entry. The director will group
+            # words into scenes (up to ~5-6 seconds each) — giving it full
+            # control over scene boundaries rather than being locked to
+            # NLP-derived sentence splits that can run 10-20 seconds.
+            if not transcript.words:
+                raise RuntimeError("AssemblyAI returned no word-level data")
 
-            # ── Export sentences JSON ─────────────────────────────────────────
-            sentences_data = [
+            word_by_word_transcription_data = [
                 {
                     "id": i + 1,
-                    "text": s.text,
-                    "start_ms": s.start,
-                    "end_ms": s.end,
+                    "text": w.text,
+                    "start_ms": w.start,
+                    "end_ms": w.end,
                 }
-                for i, s in enumerate(transcript.get_sentences())
+                for i, w in enumerate(transcript.words)
             ]
             await loop.run_in_executor(
-                None, _write_json, sentences_path, sentences_data
+                None, _write_json, word_by_word_trancription_json_path, word_by_word_transcription_data
             )
             logger.info(
-                f"✅ Sentences saved: {sentences_path} "
-                f"| {len(sentences_data)} sentences"
+                f"✅ Words saved: {word_by_word_trancription_json_path} "
+                f"| {len(word_by_word_transcription_data)} words"
             )
 
             return {
-                "srt_path": srt_path,
-                "sentences_path": sentences_path,
-                "sentences": sentences_data,
+                "word_by_word_trancription_json_path": word_by_word_trancription_json_path,
+                "word_by_word_transcription_data": word_by_word_transcription_data,
             }
 
         except Exception as exc:
@@ -132,11 +134,6 @@ def _do_transcribe(audio_file: str):
     return transcriber.transcribe(audio_file, config=transcription_config)
 
 
-def _write_text(path: str, content: str):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-
 def _write_json(path: str, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -149,11 +146,11 @@ def _write_json(path: str, data):
 if __name__ == "__main__":
     audio_file = (
         "output/audios/"
-        "ElevenLabs_2026-03-24T04_13_50_Adam - Dominant, Firm_pre_sp100_s45_sb55_se35_b_m2.mp3"
+        "Video_Automation_1.wav"
     )
     result = asyncio.run(transcribe_segment(audio_file, "testing_1"))
     if result:
         print(f"SRT: {result['srt_path']}")
-        print(f"Sentences: {result['sentences_path']}")
+        print(f"Sentences: {result['word_by_word_trancription_json_path']}")
         for s in result["sentences"]:
             print(f"  [{s['start_ms']}ms → {s['end_ms']}ms] {s['text']}")

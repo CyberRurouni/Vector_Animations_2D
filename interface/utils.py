@@ -117,35 +117,61 @@ def log_segment_duration_diff(
 def mux_audio_into_video(silent_video_path: str, audio_path: str, output_path: str):
     """
     Merge a silent video and an audio file into a single .mp4 using FFmpeg.
-    Falls back to renaming the silent video if muxing fails.
+    If the video is shorter than the audio, the last frame is held to cover
+    the difference. Falls back to renaming the silent video if muxing fails.
     """
     try:
-        subprocess.run(
-            [
+        audio_duration_ms = get_audio_duration_ms(audio_path)
+        video_duration_ms = get_segment_duration(silent_video_path)
+        diff_ms = audio_duration_ms - video_duration_ms
+
+        if diff_ms > 0:
+            # Hold the last frame for `diff_ms` milliseconds to cover trailing audio
+            pad_seconds = diff_ms / 1000
+            logger.info(
+                f"⏩ Video is {pad_seconds:.3f}s shorter than audio — padding last frame"
+            )
+            video_filter = f"tpad=stop_mode=clone:stop_duration={pad_seconds}"
+            cmd = [
                 "ffmpeg",
                 "-y",
                 "-i",
                 silent_video_path,
                 "-i",
                 audio_path,
-                "-filter_complex",
-                "[0:v]tpad=stop_mode=clone:stop_duration=1[v]",
-                "-map",
-                "[v]",
-                "-map",
-                "1:a",
+                "-filter:v",
+                video_filter,
                 "-c:v",
-                "libx264",
+                "libx264",  # must re-encode when using a filter
+                "-c:a",
+                "aac",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                output_path,
+            ]
+        else:
+            # Video is already >= audio length; just copy streams, trim to audio
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                silent_video_path,
+                "-i",
+                audio_path,
+                "-c:v",
+                "copy",
                 "-c:a",
                 "aac",
                 "-shortest",
                 output_path,
-            ],
-            check=True,
-            capture_output=True,
-        )
+            ]
+
+        subprocess.run(cmd, check=True, capture_output=True)
         os.remove(silent_video_path)
         logger.info(f"🔊 Audio muxed → {output_path}")
+
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ FFmpeg mux failed: {e.stderr.decode()}")
         os.rename(silent_video_path, output_path)
@@ -155,6 +181,83 @@ def mux_audio_into_video(silent_video_path: str, audio_path: str, output_path: s
 # ─────────────────────────────────────────────────────────────────────────────
 # Scene planning
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def apply_scene_timestamps(
+    scenes: list[dict],
+    all_sentences: list[dict],
+    audio_path: str,
+    fps: int,
+) -> None:
+    """
+    Stamp start_ms, end_ms, and duration onto every scene in-place.
+    Must be called ONCE on the fully-merged scene list for a segment —
+    never per-batch, because the last-scene audio-stretch would otherwise
+    swallow all subsequent batches' scenes.
+
+    Passes:
+      1. Assign real timestamps from the transcription sentence data.
+      2. Fill silence gaps (stretch each scene's end to the next scene's start).
+      3. Anchor the very first scene of the segment to 0 ms.
+      4. Stretch the last scene to cover trailing audio silence.
+      5. Compute duration for every scene.
+    """
+    sentence_timing_by_id = {s["id"]: s for s in all_sentences}
+
+    # ── Pass 1: Assign timestamps from transcription ──────────────────────────
+    for scene in scenes:
+        sentence_id = scene.get("sentence_id")
+        sentence_ids = sentence_id if isinstance(sentence_id, list) else [sentence_id]
+        known_ids = [sid for sid in sentence_ids if sid in sentence_timing_by_id]
+
+        if not known_ids:
+            logger.warning(
+                f"⚠️  Scene {sentence_id} — no matching sentence IDs in transcription, "
+                f"scene will have zero duration and likely be skipped"
+            )
+            scene["start_ms"] = 0
+            scene["end_ms"] = 0
+            scene["duration"] = 0.0
+            continue
+
+        scene["start_ms"] = min(
+            sentence_timing_by_id[sid]["start_ms"] for sid in known_ids
+        )
+        scene["end_ms"] = max(sentence_timing_by_id[sid]["end_ms"] for sid in known_ids)
+
+    # ── Pass 2: Fill silence gaps between scenes ──────────────────────────────
+    for index, scene in enumerate(scenes[:-1]):
+        next_start = scenes[index + 1].get("start_ms", scene["end_ms"])
+        if next_start > scene["end_ms"]:
+            scene["end_ms"] = next_start
+
+    # ── Pass 3: Anchor first scene of segment to 0 ms ────────────────────────
+    first_scene = scenes[0]
+    first_sid = first_scene.get("sentence_id")
+    first_sid = first_sid[0] if isinstance(first_sid, list) else first_sid
+    if first_sid == 1 and first_scene.get("start_ms", 0) > 0:
+        logger.info("🟢 First sentence detected → setting start_ms to 0")
+        first_scene["start_ms"] = 0
+    else:
+        logger.info("🚫 Not first sentence → no start_ms change")
+
+    # ── Pass 4: Stretch last scene to cover trailing audio silence ────────────
+    audio_duration_ms = get_audio_duration_ms(audio_path)
+    last_scene = scenes[-1]
+    if audio_duration_ms > last_scene.get("end_ms", 0):
+        last_scene["end_ms"] = audio_duration_ms
+
+    # ── Pass 5: Stretch last scene to ensure fps calculations doesn't shorten final video length ────────────
+    total_duration = last_scene["end_ms"] - first_scene["start_ms"]
+    final_video_length = round(total_duration * fps) / fps
+    delta = total_duration - final_video_length
+
+    if delta > 0:
+        last_scene["end_ms"] += delta
+
+    # ── Pass 6: Compute duration for every scene ──────────────────────────────
+    for scene in scenes:
+        scene["duration"] = (scene["end_ms"] - scene["start_ms"]) / 1000
 
 
 def plan_scene_batch(
@@ -170,8 +273,8 @@ def plan_scene_batch(
     the event loop.
 
     Returns:
-        List of scene dicts from the AI planner, each element containing
-        concept + asset_type + style_tag as decided by the director.
+        List of scene dicts from the AI planner. No timestamps yet — timestamps
+        are applied once across all batches via apply_scene_timestamps().
     """
     from core import generate_scene_plan
 
@@ -182,7 +285,6 @@ def plan_scene_batch(
     plan = generate_scene_plan(
         batch_sentences=batch,
         full_context_sentences=full_context,
-        audio_path=audio_path,
     )
     return plan.get("scenes", [])
 
@@ -227,6 +329,7 @@ async def generate_icons_for_segment(scenes: list[dict], asset_engine) -> None:
                 for sub_idx, icon_item in enumerate(element.get(slot, [])):
                     jobs.append(
                         (
+                            icon_item.get("prompt", ""),
                             icon_item.get("concept", ""),
                             icon_item.get("name") or f"{slot}_{sub_idx}",
                             icon_item.get("asset_type") or parent_asset_type,
@@ -241,6 +344,7 @@ async def generate_icons_for_segment(scenes: list[dict], asset_engine) -> None:
             else:
                 jobs.append(
                     (
+                        element.get("prompt", ""),
                         element.get("concept", ""),
                         element.get("name") or slot,
                         element.get("asset_type", "icon"),
@@ -262,13 +366,14 @@ async def generate_icons_for_segment(scenes: list[dict], asset_engine) -> None:
     # One batch call — AssetEngine handles all concurrency internally.
     # Signature: (concept, name, asset_type, style_tag, seg_name)
     fetch_inputs = [
-        (concept, name, asset_type, style_tag, seg_name)
-        for concept, name, asset_type, style_tag, seg_name, *_ in jobs
+        (prompt, concept, name, asset_type, style_tag, seg_name)
+        for prompt, concept, name, asset_type, style_tag, seg_name, *_ in jobs
     ]
     results = await asset_engine.fetch_or_generate_batch(fetch_inputs)
 
     # Write results back into elements in-place
     for (
+        prompt,
         concept,
         name,
         asset_type,
@@ -314,6 +419,8 @@ def _resolve_animation(name: str, fallback: str):
         bounce_out,
         elastic_scale,
         elastic_scale_out,
+        slide_in_from_top,
+        slide_out_to_top,
         slide_in_from_left,
         slide_out_to_left,
         slide_in_from_right,
@@ -333,6 +440,8 @@ def _resolve_animation(name: str, fallback: str):
         "bounce_out": bounce_out,
         "elastic_scale": elastic_scale,
         "elastic_scale_out": elastic_scale_out,
+        "slide_in_from_top": slide_in_from_top,
+        "slide_out_to_top": slide_out_to_top,
         "slide_in_from_left": slide_in_from_left,
         "slide_out_to_left": slide_out_to_left,
         "slide_in_from_right": slide_in_from_right,
@@ -376,7 +485,7 @@ def build_clip_from_scene(scene: dict):
             logger.error(
                 f"❌ No local_path for slot '{slot}' in scene {scene.get('sentence_id')} falling back to default path"
             )
-            path = FALLBACK_ASSET_PATH 
+            path = FALLBACK_ASSET_PATH
         return path
 
     def get_paths(slot: str) -> list:

@@ -58,7 +58,7 @@ create or replace function match_asset(
     query_embedding vector(1536),
     p_asset_type text,
     p_style_tag text default null,
-    similarity_threshold float default 0.9
+    p_similarity_threshold float default 0.85
 )
 returns table (
     id uuid,
@@ -78,7 +78,7 @@ as $$
             p_style_tag is null
             or style_tag = p_style_tag
         )
-        and (embedding <=> query_embedding) <= (1 - similarity_threshold)
+        and (embedding <=> query_embedding) <= (1 - p_similarity_threshold)
     order by embedding <=> query_embedding
     limit 1;
 $$;

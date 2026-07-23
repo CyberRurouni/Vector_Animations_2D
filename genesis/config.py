@@ -26,7 +26,7 @@ openrouter_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
 )
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)  # This is the correct way now
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) 
 
 transcriber = aai.Transcriber()
 transcription_config = aai.TranscriptionConfig(speech_models=["universal-2"])

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 
 import aiohttp
 from dotenv import load_dotenv
@@ -28,73 +27,6 @@ _DB_BUCKET = "assets"
 _DB_BATCH_SIZE = 20
 _IMAGE_GEN_BATCH_SIZE = 15  # max images sent to a provider in one call
 _BG_REMOVAL_WORKERS = 8
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Style-conditional image generation prompt builder
-# ─────────────────────────────────────────────────────────────────────────────
-
-_STYLE_SUFFIXES: dict[str, str] = {
-    "silhouette": (
-        "Flat 2D icon. Pure solid black filled shape on white background #FFFFFF. "
-        "No interior detail, no outlines, no color, no gradients, no shading. "
-        "Maximum contrast. Bold filled silhouette only."
-    ),
-    "outline": (
-        "Clean line-art illustration on white background #FFFFFF. "
-        "Thin to medium weight black outlines, minimal fill. "
-        "No color, no gradients, no shading. Interior structural detail allowed "
-        "where it clarifies the concept."
-    ),
-    "solid": (
-        "Flat 2D icon with bold solid colors. Clean filled shapes, "
-        "no gradients, no shading, no shadows. Use color intentionally — "
-        "only where color IS the meaning (e.g. red for danger, green for go, "
-        "brand colors for UI elements). White or light background."
-    ),
-    "light_colored": (
-        "Soft illustrated style with muted, pastel tones. "
-        "Gentle color washes, no harsh outlines, no heavy shadows. "
-        "Warm and approachable feel. Light background, clean negative space. "
-        "Tones should feel calm and inviting, not vibrant or saturated."
-    ),
-    "pencil_sketch": (
-        "Hand-drawn pencil sketch style. Graphite/grey tones on white background. "
-        "Visible sketch lines, soft shading, natural imperfect strokes. "
-        "No digital polish, no color. Feels intimate and hand-crafted."
-    ),
-}
-
-_ASSET_TYPE_NOTES: dict[str, str] = {
-    "icon": (
-        "Design as a flat, minimal icon — bold single visual that reads instantly "
-        "at any size. Centered composition with generous negative space. "
-        "No background scene, no texture fills."
-    ),
-    "sketch": (
-        "Design as a character illustration or expressive scene — "
-        "visible emotion, natural pose, illustrative detail on the figure. "
-        "Anime-influenced or cartoon style is fine where it suits the concept."
-    ),
-}
-
-
-def build_generation_prompt(concept: str, asset_type: str, style_tag: str) -> str:
-    """
-    Build an image generation prompt from a concept + the director's style decisions.
-    No LLM call — deterministic template expansion.
-
-    Args:
-        concept:    The concept string written by the director.
-        asset_type: "icon" | "sketch"
-        style_tag:  "silhouette" | "outline" | "solid" | "light_colored" | "pencil_sketch"
-
-    Returns:
-        A ready-to-send image generation prompt string.
-    """
-    type_note = _ASSET_TYPE_NOTES.get(asset_type, _ASSET_TYPE_NOTES["icon"])
-    style_suffix = _STYLE_SUFFIXES.get(style_tag, _STYLE_SUFFIXES["silhouette"])
-
-    return f"{concept}. {type_note} {style_suffix}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,21 +59,21 @@ class AssetEngine:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def fetch_or_generate(
-        self, concept: str, name: str, asset_type: str, style_tag: str, seg_name: str
+        self, prompt:str, concept: str, name: str, asset_type: str, style_tag: str, seg_name: str
     ) -> dict:
         results = await self.fetch_or_generate_batch(
-            [(concept, name, asset_type, style_tag, seg_name)]
+            [(prompt, concept, name, asset_type, style_tag, seg_name)]
         )
         return results[seg_name]
 
     async def fetch_or_generate_batch(
-        self, concepts: list[tuple[str, str, str, str, str]]
+        self, concepts: list[tuple[str, str, str, str, str, str]]
     ) -> dict[str, dict]:
         """Main entry point: returns {seg_name: {"name": str, "path": str}}"""
 
         # Prepare jobs
         jobs = []
-        for concept, name, asset_type, style_tag, seg_name in concepts:
+        for prompt,concept, name, asset_type, style_tag, seg_name in concepts:
             logger.info(
                 f"📋 Job prepared: '{name}' [{asset_type}/{style_tag}] for '{seg_name}'"
             )
@@ -153,20 +85,13 @@ class AssetEngine:
                     "asset_type": asset_type,
                     "style_tag": style_tag,
                     "embedding": [],
-                    "prompt": None,
+                    "prompt": prompt,
                     "metadata": {},
                 }
             )
 
         # DB lookup
         db_hits, misses = await self._db_lookup(jobs)
-
-        # Build prompts for misses
-        for job in misses:
-            job["prompt"] = build_generation_prompt(
-                job["concept"], job["asset_type"], job["style_tag"]
-            )
-            logger.info(f"🎨 Prompt built for miss: '{job['asset_name']}'")
 
         # Generate missing assets
         results: dict[str, dict] = {**db_hits}
@@ -277,7 +202,7 @@ class AssetEngine:
             return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Generation + Storage (Background removal REMOVED)
+    # Generation + Storage (Background removal via Runware BiRefNet v1 Base)
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _generate_and_store(self, jobs: list[dict]) -> dict[str, dict]:
@@ -385,10 +310,14 @@ class AssetEngine:
 
         real_paths = [p for p in paths.values() if p != FALLBACK_ASSET_PATH]
         logger.info(f"✨ Stripping backgrounds for {len(real_paths)} asset(s)...")
-        with ThreadPoolExecutor(max_workers=_BG_REMOVAL_WORKERS) as pool:
-            await asyncio.gather(
-                *[loop.run_in_executor(pool, remove_background, p) for p in real_paths]
-            )
+
+        semaphore = asyncio.Semaphore(_BG_REMOVAL_WORKERS)
+
+        async def _strip(path: str):
+            async with semaphore:
+                await remove_background(path, self._runware_api_key)
+
+        await asyncio.gather(*[_strip(p) for p in real_paths], return_exceptions=True)
 
         return {
             job["seg_name"]: {"name": job["asset_name"], "path": paths[job["seg_name"]]}
@@ -428,10 +357,11 @@ if __name__ == "__main__":
     async def _test():
         concepts = [
             (
+                "A smiling person reminiscing about the past, pixel art",
                 "A smiling person reminiscing about the past",
                 "person_reminiscing_smile",
-                "sketch",
-                "light_colored",
+                "pixels",
+                "pixilated",
                 "scene1__left_icon",
             ),
         ]

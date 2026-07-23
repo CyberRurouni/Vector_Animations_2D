@@ -11,7 +11,6 @@ from ..animations.utils.anim_utils import load_image_clip
 from ..animations.entry_animations import fade_in
 from ..animations.exit_animations import fade_out
 
-
 logger = logging.getLogger("LAYOUTS")
 
 # ─────────────────────────────────────────────
@@ -20,7 +19,8 @@ logger = logging.getLogger("LAYOUTS")
 
 VIDEO_WIDTH, VIDEO_HEIGHT = 1920, 1080
 DEFAULT_MAIN_ICON_SIZE = 600
-DEFAULT_SUPPORTING_ICON_SIZE = 450
+DEFUALT_CENTER_WITH_SUPPORT_MAIN_ICON_SIZE = 350
+DEFAULT_SUPPORTING_ICON_SIZE = 250
 DEFAULT_LIST_ICON_SIZE = 450
 DEFAULT_DURATION = 4.0
 
@@ -250,7 +250,7 @@ def create_split_comparison_scene(
 
     bg = create_background(duration)
 
-    divider = ColorClip(size=(5, VIDEO_HEIGHT), color=(200, 200, 200)).with_position(
+    divider = ColorClip(size=(5, VIDEO_HEIGHT), color=(000, 000, 000)).with_position(
         (VIDEO_WIDTH // 2, 0)
     )
     left = (
@@ -307,11 +307,16 @@ def create_progressive_icons_scene(
         icon_dur = duration - delay
 
         icon = (
-            load_image_clip(icon_path).resized(height=DEFAULT_LIST_ICON_SIZE).with_position(positions[i])
+            load_image_clip(icon_path)
+            .resized(height=DEFAULT_LIST_ICON_SIZE)
+            .with_position(positions[i])
         )
 
         logger.debug(
-            "  icon %.2f — delay: %.1f s, available duration: %.1f s", i, delay, icon_dur
+            "  icon %.2f — delay: %.1f s, available duration: %.1f s",
+            i,
+            delay,
+            icon_dur,
         )
         icon_layers = _apply_in_out(
             icon,
@@ -359,7 +364,7 @@ def create_center_with_support_scene(
     # ── Main icon ────────────────────────────────────────────
     main = (
         load_image_clip(main_icon)
-        .resized(height=DEFAULT_MAIN_ICON_SIZE)
+        .resized(height=DEFUALT_CENTER_WITH_SUPPORT_MAIN_ICON_SIZE)
         .with_position(("center", "center"))
     )
     layers.extend(
@@ -367,14 +372,16 @@ def create_center_with_support_scene(
     )
 
     # ── Support icons (staggered) ─────────────────────────────
-    positions = _get_support_positions(len(support_icons), 150)
+    positions = _get_support_positions(len(support_icons), DEFAULT_SUPPORTING_ICON_SIZE)
 
     for i, icon_path in enumerate(support_icons):
         delay = 0.5 + i * 0.4
         icon_dur = duration - delay
 
         icon = (
-            load_image_clip(icon_path).resized(height=DEFAULT_SUPPORTING_ICON_SIZE).with_position(positions[i])
+            load_image_clip(icon_path)
+            .resized(height=DEFAULT_SUPPORTING_ICON_SIZE)
+            .with_position(positions[i])
         )
 
         logger.debug(
@@ -402,7 +409,8 @@ def create_center_with_support_scene(
 
 if __name__ == "__main__":
     import logging
-    from ..animations.entry_animations import (
+
+    from modules.scene_engine.animations.entry_animations import (
         fade_in,
         pop,
         pop_in,
@@ -410,9 +418,10 @@ if __name__ == "__main__":
         elastic_scale,
         slide_in_from_left,
         slide_in_from_right,
+        slide_in_from_top,
         slide_in_from_bottom,
     )
-    from ..animations.exit_animations import (
+    from modules.scene_engine.animations.exit_animations import (
         fade_out,
         pop_out,
         pop_in_out,
@@ -421,6 +430,7 @@ if __name__ == "__main__":
         slide_out_to_right,
         slide_out_to_left,
         slide_out_to_top,
+        slide_out_to_bottom,
     )
     from core import render_all_scenes_parallel
 
@@ -431,68 +441,63 @@ if __name__ == "__main__":
     ICONS_LIST = [ICON_1, ICON_2, ICON_1]  # For progressive/support layouts
 
     # Animation pairs (Entry, Exit)
-    pairs = [
-        (fade_in, fade_out),
-        (pop, pop_out),
-        (pop_in, pop_in_out),
-        (bounce, bounce_out),
-        (elastic_scale, elastic_scale_out),
-        (slide_in_from_left, slide_out_to_right),
-        (slide_in_from_right, slide_out_to_left),
-        (slide_in_from_bottom, slide_out_to_top),
-    ]
     scenes = []
 
-    for entry, exit_ in pairs:
-        anim_name = entry.__name__
-
-        # 1. Center Layout
-        scenes.append(
-            create_center_scene(icon_path=ICON_1, animate_in=entry, animate_out=exit_)
+    scenes.append(
+        create_center_with_support_scene(
+            main_icon=ICON_1,
+            support_icons=[ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2],
+            duration=5,
+            animate_main_in=fade_in,
+            animate_main_out=fade_out,
+            animate_support_in=fade_in,
+            animate_support_out=fade_out,
         )
-
-        # 2. Side by Side Layout
-        scenes.append(
-            create_side_by_side_scene(
-                left_icon=ICON_1,
-                right_icon=ICON_2,
-                animate_left_in=entry,
-                animate_left_out=exit_,
-                animate_right_in=entry,
-                animate_right_out=exit_,
-            )
+    )
+    scenes.append(
+        create_center_with_support_scene(
+            main_icon=ICON_1,
+            support_icons=[ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2],
+            duration=5,
+            animate_main_in=fade_in,
+            animate_main_out=fade_out,
+            animate_support_in=fade_in,
+            animate_support_out=fade_out,
         )
-
-        # 3. Split Comparison Layout (including divider animation)
-        scenes.append(
-            create_split_comparison_scene(
-                left_icon=ICON_1,
-                right_icon=ICON_2,
-                animate_left_in=entry,
-                animate_left_out=exit_,
-                animate_right_in=entry,
-                animate_right_out=exit_,
-            )
+    )
+    scenes.append(
+        create_center_with_support_scene(
+            main_icon=ICON_1,
+            support_icons=[ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2],
+            duration=5,
+            animate_main_in=fade_in,
+            animate_main_out=fade_out,
+            animate_support_in=fade_in,
+            animate_support_out=fade_out,
         )
-
-        # 4. Progressive Icons Layout (3 icons)
-        scenes.append(
-            create_progressive_icons_scene(
-                icon_list=ICONS_LIST, animate_each_in=entry, animate_each_out=exit_
-            )
+    )
+    scenes.append(
+        create_center_with_support_scene(
+            main_icon=ICON_1,
+            support_icons=[ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2],
+            duration=5,
+            animate_main_in=fade_in,
+            animate_main_out=fade_out,
+            animate_support_in=fade_in,
+            animate_support_out=fade_out,
         )
-
-        # 5. Center with Support Layout
-        scenes.append(
-            create_center_with_support_scene(
-                main_icon=ICON_1,
-                support_icons=[ICON_2, ICON_2, ICON_2, ICON_2],
-                animate_main_in=entry,
-                animate_main_out=exit_,
-                animate_support_in=entry,
-                animate_support_out=exit_,
-            )
+    )
+    scenes.append(
+        create_center_with_support_scene(
+            main_icon=ICON_1,
+            support_icons=[ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2, ICON_2],
+            duration=5,
+            animate_main_in=fade_in,
+            animate_main_out=fade_out,
+            animate_support_in=fade_in,
+            animate_support_out=fade_out,
         )
+    )
 
     render_all_scenes_parallel(
         scenes,

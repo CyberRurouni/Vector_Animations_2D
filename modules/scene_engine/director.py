@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import random
 from .utils.scene_utils import _load_reference_json
 from typing import Any, Dict, List
 
@@ -10,16 +11,17 @@ logger = logging.getLogger("DIRECTOR")
 def generate_scene_plan(
     batch_sentences: List[Dict[str, Any]],
     full_context_sentences: List[str],
-    audio_path: str,
 ) -> Dict[str, Any]:
     """
     🎬 Plans scenes for a batch of narration sentences.
 
     - One scene per sentence, or merged when visually justified.
     - AI picks layout, animations, and a concept string per icon slot.
-    - AI also picks asset_type and style_tag per concept — passed directly to
-      AssetFetcher so no second LLM call is needed there.
-    - Concepts + style decisions are passed to AssetFetcher for DB lookup / generation.
+    - AI also picks asset_type and style_tag per concept, AND writes the full
+      image-generation "prompt" itself — passed directly to AssetFetcher /
+      the image generator so no second LLM call is needed there.
+    - Concepts + style decisions + prompts are passed to AssetFetcher for DB
+      lookup / generation.
     - Duration is always computed post-response from start_ms/end_ms.
 
     ── Asset typing decided here, by the director ──────────────────────────────
@@ -28,12 +30,28 @@ def generate_scene_plan(
       - "sketch" → looser, more illustrative character scene (e.g. anime-style girl,
                    character expressing strong emotion, a scene with a background feel)
 
-    style_tag: "silhouette" | "outline" | "solid" | "light_colored" | "pencil_sketch"
-      - "silhouette"    → pure black filled shape, no interior detail
-      - "outline"       → clean line-art, unfilled or lightly filled
-      - "solid"         → flat filled shapes with bold colors where appropriate
-      - "light_colored" → soft, slightly-colored illustration (pastel or muted tones)
-      - "pencil_sketch" → hand-drawn pencil feel, grey/graphite tones
+    style_tag (priority order — see system prompt for full decision tree):
+      ICON tags:
+        - "colored_icon" → full natural/descriptive color (default for icons)
+        - "outline"      → clean line-art, unfilled or lightly filled
+        - "solid"        → flat filled shape, BLACK or DARK-GREY monochrome only
+        - "silhouette"   → pure black filled shape, no interior detail (rarest)
+      SKETCH tags:
+        - "colored_sketch" → full, vivid color range (default for sketches)
+        - "light_colored"  → soft, pastel/muted color illustration
+        - "pencil_sketch"  → hand-drawn pencil feel, grey/graphite tones (raw/intense only)
+      The AI is NOT restricted to only these seven tags — it may reach for another
+      style label (e.g. "pixel_art", "claymation", "flat_vector") when it genuinely
+      suits a beat better. The seven above are the reliable defaults; anything else
+      is an intentional exception, not a shortcut.
+
+    prompt: <str> — the ACTUAL text sent to the image generator. Written by the
+      AI itself, per element (and per sub-item in icon_list/support_icons). It is
+      the "concept" fused with rendering instructions for the chosen asset_type/
+      style_tag (composition, line/fill treatment, color or lack of it), and it
+      ALWAYS specifies a plain white (#FFFFFF) background, no matter the style.
+      It must never call for real/photorealistic people or anything NSFW/obscene —
+      see system prompt for the full template and safety rules.
 
     Output schema:
     {
@@ -48,9 +66,11 @@ def generate_scene_plan(
             {
               "slot": <str>,           # "main_icon" | "left_icon" | "right_icon"
               "name": <str>,           # snake_case filename label, 2-4 words (e.g. "figure_at_crossroads")
-              "concept": <str>,        # vivid description for image generation
+              "concept": <str>,        # vivid description of the image ITSELF (what it depicts)
               "asset_type": <str>,     # "icon" | "sketch"
-              "style_tag": <str>,      # "silhouette"|"outline"|"solid"|"light_colored"|"pencil_sketch"
+              "style_tag": <str>,      # "colored_icon"|"outline"|"solid"|"silhouette"|"colored_sketch"|"light_colored"|"pencil_sketch"|<other, if it genuinely fits better>
+              "prompt": <str>,         # FULL image-generation prompt: concept + rendering
+                                       # instructions for asset_type/style_tag + white background
               "animate_in": <str>,
               "animate_out": <str>
             },
@@ -62,7 +82,8 @@ def generate_scene_plan(
                   "name": <str>,
                   "concept": <str>,
                   "asset_type": <str>,
-                  "style_tag": <str>
+                  "style_tag": <str>,
+                  "prompt": <str>
                 },
                 ...
               ],
@@ -77,7 +98,8 @@ def generate_scene_plan(
                   "name": <str>,
                   "concept": <str>,
                   "asset_type": <str>,
-                  "style_tag": <str>
+                  "style_tag": <str>,
+                  "prompt": <str>
                 },
                 ...
               ],
@@ -89,7 +111,7 @@ def generate_scene_plan(
       ]
     }
     """
-    from core import call_openai, get_audio_duration_ms
+    from core import call_openai
 
     # ── Load reference JSONs ──────────────────────────────────────────────────
     _LAYOUTS_REF = _load_reference_json("layouts.json")
@@ -105,7 +127,7 @@ def generate_scene_plan(
     }
 
     try:
-        logger.info(f"🎬 Planning {len(batch_sentences)} sentences...")
+        logger.info(f"🎬 Planning {len(batch_sentences)} words...")
 
         layouts_block = json.dumps(_LAYOUTS_REF, indent=2)
         entry_animations_block = json.dumps(_ENTRY_ANIMATIONS_REF, indent=2)
@@ -133,10 +155,16 @@ Scene id=1 ("A single idea emerges."):
   main_icon:
     name: "eureka_figure_lightbulb"
     concept: "a lone human figure standing upright with one arm raised, index
-    finger pointing upward as a lightbulb appears above their head — the classic eureka
-    posture, solid black silhouette"
+    finger pointing upward as a glowing yellow lightbulb appears above their head,
+    warm orange filament glow — the classic eureka posture"
     asset_type: "icon"
-    style_tag: "silhouette"
+    style_tag: "colored_icon"
+    prompt: "A lone human figure standing upright with one arm raised, index finger
+    pointing upward as a glowing yellow lightbulb appears above their head, warm
+    orange filament glow — the classic eureka posture. Design as a flat, minimal
+    icon — bold single visual that reads instantly at any size. Centered composition
+    with generous negative space. Natural, descriptive color. No background scene,
+    no texture fills. Flat 2D icon. White background (#FFFFFF)."
 
 Scene id=2 ("It grows rapidly."):
   layout: create_center_scene
@@ -155,15 +183,21 @@ Scene id=3 ("She couldn't stop crying."):
     face buried in her arms, dark hair falling forward — deep grief, overwhelmed"
     asset_type: "sketch"
     style_tag: "pencil_sketch"
+    prompt: "Stylized anime-style girl character sitting on the floor, knees pulled
+    to chest, face buried in her arms, dark hair falling forward — deep grief,
+    overwhelmed. Illustrative character-style sketch, hand-drawn pencil/graphite
+    feel, grey tones only, raw and intimate linework. Loose but legible rendering,
+    not photorealistic. No background scene or environment — subject only. White
+    background (#FFFFFF)."
 
 Scene (notification / subscribe moment):
   layout: create_center_scene
   main_icon:
     name: "subscribe_button_bell"
     concept: "a bright red subscribe button with the word SUBSCRIBE in white bold
-    text, a notification bell beside it — social media call to action"
+    text, a yellow notification bell beside it — social media call to action"
     asset_type: "icon"
-    style_tag: "solid"
+    style_tag: "colored_icon"
 
 Scene (calm, meditative):
   layout: create_center_scene
@@ -174,54 +208,29 @@ Scene (calm, meditative):
     asset_type: "sketch"
     style_tag: "light_colored"
 
+Scene (emotional peak / breakthrough moment):
+  layout: create_center_scene
+  main_icon:
+    name: "figure_triumphant_arms_up"
+    concept: "a vividly colored figure standing on a hilltop, arms thrown wide
+    overhead, head tilted back, warm golden-hour light — the breakthrough moment"
+    asset_type: "sketch"
+    style_tag: "colored_sketch"
+
 Scene ids=[1,2] MERGED ("A single idea emerges. It grows rapidly."):
   layout: create_progressive_icons_scene
   icon 1:
     name: "fragile_idea_born"
-    concept: "a small crouched figure with a tiny lightbulb above their head,
+    concept: "a small crouched figure with a tiny dim lightbulb above their head,
     symbolizing a fragile new idea just born"
     asset_type: "icon"
-    style_tag: "silhouette"
+    style_tag: "outline"
   icon 2:
     name: "idea_fully_grown"
-    concept: "the same figure now standing tall with arms spread wide —
-    the idea has fully grown"
+    concept: "the same figure now standing tall with arms spread wide, a bright
+    glowing yellow lightbulb fully lit above their head — the idea has fully grown"
     asset_type: "icon"
-    style_tag: "silhouette"
-
----
-
-STYLE DECISION GUIDE:
-
-"silhouette"    → pure black filled figure/object, maximum contrast, for bold
-                  factual or neutral content. DEFAULT for most icon-style scenes.
-
-"outline"       → clean line-art, good for process steps, diagrams, objects.
-                  Use when interior detail would help (e.g. a clock face).
-
-"solid"         → flat colored shapes. Use when COLOR IS THE POINT — a red
-                  warning sign, a subscribe button, traffic light, flag, etc.
-
-"light_colored" → soft pastel/muted illustration. Use for warm emotional moments,
-                  calm resolutions, the "after" in a positive arc — NOT for
-                  tension or conflict scenes.
-
-"pencil_sketch" → hand-drawn graphite feel. Use for deep emotional sketches,
-                  character-driven intimate moments, introspection.
-
-ASSET TYPE GUIDE:
-
-"icon"   → symbol, flat figure, object, simple scene — clean and immediate.
-           Use for most scenes.
-
-"sketch" → loose illustrative character scene — an anime-style character, a
-           figure with visible facial expression, a styled scene with atmosphere.
-           Use when the scene calls for visible emotion on a face, or when the
-           visual screenshots you've seen (a girl peeking over a ledge, a girl
-           sitting in distress, a meditating figure) are the right vibe.
-           Sketches can be pencil_sketch or light_colored.
-
-NEVER default everything to silhouette. Read the script arc. Match the energy.
+    style_tag: "colored_icon"
 
 ---
 
@@ -233,61 +242,25 @@ create_center_scene:
     {
       "slot": "main_icon",
       "name": "figure_deep_thought",
-      "concept": "a human silhouette seated cross-legged, chin resting on one hand, eyes closed, surrounded by faint circular ripples — deep internal thought",
+      "concept": "a human figure in soft blue tones, seated cross-legged, chin resting on one hand, eyes closed, faint golden ripples radiating outward — deep internal thought",
       "asset_type": "icon",
-      "style_tag": "silhouette",
+      "style_tag": "colored_icon",
+      "prompt": "A human figure in soft blue tones, seated cross-legged, chin resting on one hand, eyes closed, faint golden ripples radiating outward — deep internal thought. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. Natural, descriptive color. No background scene, no texture fills. Flat 2D icon. White background (#FFFFFF).",
       "animate_in_main": "fade_in",
       "animate_out_main": "fade_out"
     }
   ]
 }
-— OR (object-based) —
-{
-  "elements": [
-    {
-      "slot": "main_icon",
-      "name": "closed_door_question",
-      "concept": "a closed door with a bold question mark centered on it — an unknown behind a threshold, possibility and uncertainty in one image",
-      "asset_type": "icon",
-      "style_tag": "outline",
-      "animate_in_main": "fade_in",
-      "animate_out_main": "fade_out"
-    }
-  ]
-}
-
 create_side_by_side_scene:
 {
   "elements": [
     {
       "slot": "left_icon",
-      "name": "figure_holding_apple",
-      "concept": "a human figure holding an apple overhead with both hands, posture upright and confident — healthy choice",
-      "asset_type": "icon",
-      "style_tag": "silhouette",
-      "animate_in_left": "slide_in_from_left",
-      "animate_out_left": "slide_out_to_left"
-    },
-    {
-      "slot": "right_icon",
-      "name": "figure_reaching_burger",
-      "concept": "a slumped figure reaching lazily toward a large burger, shoulders drooping — indulgent choice",
-      "asset_type": "icon",
-      "style_tag": "silhouette",
-      "animate_in_right": "slide_in_from_right",
-      "animate_out_right": "slide_out_to_right"
-    }
-  ]
-}
-— OR (object-based) —
-{
-  "elements": [
-    {
-      "slot": "left_icon",
       "name": "chain_intact_solid",
-      "concept": "an unbroken chain, links solid and tight, rendered in bold black — constraint intact",
+      "concept": "an unbroken chain, links solid and tight, rendered in flat dark-grey — constraint intact",
       "asset_type": "icon",
-      "style_tag": "silhouette",
+      "style_tag": "solid",
+      "prompt": "An unbroken chain, links solid and tight — constraint intact. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. No background scene, no texture fills. Flat 2D icon. Pure solid dark-grey filled shape. No outlines, no color, no gradients, no shading. White background (#FFFFFF).",
       "animate_in_left": "slide_in_from_left",
       "animate_out_left": "slide_out_to_left"
     },
@@ -296,7 +269,8 @@ create_side_by_side_scene:
       "name": "chain_shattered_broken",
       "concept": "the same chain with its center link shattered apart, two halves falling away — freedom through breakage",
       "asset_type": "icon",
-      "style_tag": "silhouette",
+      "style_tag": "solid",
+      "prompt": "The same chain with its center link shattered apart, two halves falling away — freedom through breakage. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. No background scene, no texture fills. Flat 2D icon. Pure solid dark-grey filled shape. No outlines, no color, no gradients, no shading. White background (#FFFFFF).",
       "animate_in_right": "slide_in_from_right",
       "animate_out_right": "slide_out_to_right"
     }
@@ -312,6 +286,7 @@ create_split_comparison_scene:
       "concept": "a silhouette of a person standing energetically with arms raised under a blazing sun — daytime peak energy",
       "asset_type": "icon",
       "style_tag": "silhouette",
+      "prompt": "A person standing energetically with arms raised under a blazing sun — daytime peak energy. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. Pure solid black filled shape only — no interior detail, no outlines, no color, no gradients, no shading. Maximum contrast. White background (#FFFFFF).",
       "animate_in_left": "slide_in_from_left",
       "animate_out_left": "slide_out_to_left"
     },
@@ -321,6 +296,7 @@ create_split_comparison_scene:
       "concept": "the same figure curled up sleeping under a large crescent moon and stars — nighttime rest and recovery",
       "asset_type": "icon",
       "style_tag": "silhouette",
+      "prompt": "The same figure curled up sleeping under a large crescent moon and stars — nighttime rest and recovery. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. Pure solid black filled shape only — no interior detail, no outlines, no color, no gradients, no shading. Maximum contrast. White background (#FFFFFF).",
       "animate_in_right": "slide_in_from_right",
       "animate_out_right": "slide_out_to_right"
     }
@@ -337,49 +313,22 @@ create_progressive_icons_scene:
           "name": "figure_planting_seed",
           "concept": "a tiny human figure kneeling to plant a seed in the ground, both hands pressing into soil — the act of beginning",
           "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "A tiny human figure kneeling to plant a seed in the ground, both hands pressing into soil — the act of beginning. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         },
         {
           "name": "figure_watering_sprout",
           "concept": "the same figure standing, watering a knee-high sprout with a can — nurturing early growth",
           "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "The same figure standing, watering a knee-high sprout with a can — nurturing early growth. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         },
         {
           "name": "figure_beside_full_tree",
           "concept": "a figure standing proudly beside a full grown tree taller than themselves, one hand on the trunk — achievement reached",
           "asset_type": "icon",
-          "style_tag": "outline"
-        }
-      ],
-      "animate_in_icon_list": "pop",
-      "animate_out_icon_list": "pop_out"
-    }
-  ]
-}
-— OR (object-based progression) —
-{
-  "elements": [
-    {
-      "slot": "icon_list",
-      "icon_list": [
-        {
-          "name": "fabric_thread_loose",
-          "concept": "a single loose thread hanging from a fabric edge — the start of unraveling",
-          "asset_type": "icon",
-          "style_tag": "outline"
-        },
-        {
-          "name": "fabric_half_frayed",
-          "concept": "the same fabric now half-frayed, threads splaying outward in multiple directions — deterioration underway",
-          "asset_type": "icon",
-          "style_tag": "outline"
-        },
-        {
-          "name": "fabric_fully_dissolved",
-          "concept": "only bare threads remain where the fabric was — complete dissolution",
-          "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "A figure standing proudly beside a full grown tree taller than themselves, one hand on the trunk — achievement reached. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         }
       ],
       "animate_in_icon_list": "pop",
@@ -393,49 +342,11 @@ create_center_with_support_scene:
   "elements": [
     {
       "slot": "main_icon",
-      "name": "figure_hub_radiating",
-      "concept": "a single human figure standing at the center of radiating lines extending outward in all directions — the hub of a connected system",
-      "asset_type": "icon",
-      "style_tag": "silhouette",
-      "animate_in_main": "fade_in",
-      "animate_out_main": "fade_out"
-    },
-    {
-      "slot": "support_icons",
-      "support_icons": [
-        {
-          "name": "figures_handshake",
-          "concept": "two figures shaking hands — connection",
-          "asset_type": "icon",
-          "style_tag": "outline"
-        },
-        {
-          "name": "figure_speech_bubble",
-          "concept": "a figure with a speech bubble — communication",
-          "asset_type": "icon",
-          "style_tag": "outline"
-        },
-        {
-          "name": "figure_holding_shield",
-          "concept": "a figure holding a shield in front of them — protection",
-          "asset_type": "icon",
-          "style_tag": "outline"
-        }
-      ],
-      "animate_in_support": "pop",
-      "animate_out_support": "pop_out"
-    }
-  ]
-}
-— OR (object-based support) —
-{
-  "elements": [
-    {
-      "slot": "main_icon",
       "name": "large_keyhole_centered",
       "concept": "a large bold keyhole centered on the canvas — a single point of entry to everything locked away",
       "asset_type": "icon",
       "style_tag": "silhouette",
+      "prompt": "A large bold keyhole centered on the canvas — a single point of entry to everything locked away. Design as a flat, minimal icon — bold single visual that reads instantly at any size. Centered composition with generous negative space. Pure solid black filled shape only — no interior detail, no outlines, no color, no gradients, no shading. Maximum contrast. White background (#FFFFFF).",
       "animate_in_main": "fade_in",
       "animate_out_main": "fade_out"
     },
@@ -446,19 +357,22 @@ create_center_with_support_scene:
           "name": "key_simple_bow",
           "concept": "a key with a simple bow and blade — access",
           "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "A key with a simple bow and blade — access. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         },
         {
           "name": "padlock_closed_solid",
           "concept": "a padlock, closed and solid — security",
           "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "A padlock, closed and solid — security. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         },
         {
           "name": "door_slightly_ajar",
           "concept": "a door slightly ajar — possibility",
           "asset_type": "icon",
-          "style_tag": "outline"
+          "style_tag": "outline",
+          "prompt": "A door slightly ajar — possibility. Design as a clean line-art icon — unfilled or lightly filled, consistent stroke weight, no gradients or shading. Centered composition, generous negative space. White background (#FFFFFF)."
         }
       ],
       "animate_in_support": "pop",
@@ -477,6 +391,52 @@ You now have an additional responsibility: for each concept you write, you must
 decide BOTH the asset_type ("icon" or "sketch") AND the style_tag.
 This decision is final — it flows directly to the image generator with no second
 review step. Choose wisely based on context.
+
+═══════════════════════════════════════════════
+AUDIENCE & PACING — LOW ATTENTION SPAN
+═══════════════════════════════════════════════
+This channel is built for a short-attention-span, fast-scrolling audience (think
+Reels/Shorts/TikTok viewers). Two things follow from this:
+
+1. YOUR PRIMARY JOB IS GROUPING WORDS INTO SCENES:
+   You receive individual words, each with a start_ms and end_ms. Your first task
+   before picking any icon or layout is deciding which words belong together in
+   one scene. Think of it like a real director deciding where to cut.
+
+   GROUPING RULES:
+   - Group consecutive words into a scene that represents one clear visual idea.
+   - A scene must NOT exceed 5 seconds (5000ms) from the first word's start_ms
+     to the last word's end_ms. Hard cap: allow up to 6 seconds ONLY if cutting
+     there would break a natural phrase mid-thought AND the next word starts
+     immediately (no pause), making the cut feel jarring.
+   - A scene can be as short as 1-2 words if those words carry a strong standalone
+     concept (e.g. "Speed", "Discipline", "Ali has" before a list).
+   - Prefer natural language boundaries: cut after a noun, verb, or short phrase —
+     not mid-adjective or mid-preposition if avoidable.
+   - When you cut mid-sentence, choose the icon AND its animation so it visually
+     bridges into the next scene — a jarring icon mismatch at a cut is worse than
+     a slightly longer scene.
+   - NEVER let one static concept carry more than ~5 seconds on screen. Short,
+     frequent visual changes beat long, unchanging ones.
+   - When in doubt, prefer MORE scenes with SIMPLER concepts over fewer scenes with
+     denser ones. A new image every few seconds is what keeps this audience watching.
+
+2. VISUALLY STUNNING & ATTENTION-GRABBING CONCEPTS:
+   Every concept must be written so the AI image generator produces a striking,
+   eye-catching, instantly-readable image:
+   - Push for bold, high-contrast, dynamic compositions — strong poses, clear
+     silhouettes/shapes, dramatic angles or scale contrasts — not flat, static,
+     "stock icon" arrangements.
+   - The concept text should read like a punchy art-direction brief: specific
+     pose/gesture/expression, specific object state, specific spatial relationship
+     — enough detail that the image generator renders EXACTLY the intended scene,
+     with nothing left ambiguous or generic.
+   - Favor compositions with a clear focal point and a bit of visual drama (motion
+     lines, scale exaggeration, dramatic contrast implied through silhouette or
+     shape) — the goal is a thumbnail-worthy frame, not a plain illustration.
+   - Never sacrifice narrative accuracy for spectacle — the image must still match
+     the exact sentence (Golden Rule below) — but within that constraint, always
+     choose the more visually dynamic and arresting option.
 
 ═══════════════════════════════════════════════
 THE GOLDEN RULE — NARRATIVE SYNC
@@ -518,61 +478,173 @@ Each "concept" is a briefing to an AI image generator and must be:
 3. EMOTIONALLY LEGIBLE AT A GLANCE: The icon must communicate the feeling
    without any text. Ask: would a child understand this instantly?
 
+   TEXT ON IMAGE — STRICT RULE:
+   AI image generators handle text poorly. Depict ALL concepts visually through
+   figures, objects, symbols, and body language — NOT through written words.
+
+   The ONLY exception: single short labels that ARE the concept themselves
+   (e.g. a subscribe button showing "SUBSCRIBE", a road sign showing "STOP",
+   a title card showing "WHY" or "STOICS GUIDE"). These are acceptable ONLY when
+   the word/label is literally the visual object being depicted.
+
+   NEVER put text on an image to explain what is happening:
+   ❌ BAD: a thought bubble containing "Why am I doing this?"
+   ❌ BAD: a banner reading "What is happening to me?"
+   ❌ BAD: any sentence, question, or phrase rendered as on-screen text
+   ✅ GOOD: a figure hunched over, hands gripping head — confusion and inner turmoil
+   ✅ GOOD: a figure frozen mid-step, one arm extended toward two diverging paths — indecision
+   ✅ GOOD: a cracked mirror reflecting a distorted silhouette — identity crisis
+
+   Rule of thumb: if it would take more than 3 words to label it on a sign, depict
+   it visually instead. Max 1–3 words if text is truly unavoidable.
+
 4. COMPOSITION-MINIMAL: One or two elements maximum. Avoid cluttered scenes.
    One strong visual = powerful icon.
 
-5. NARRATIVE-AWARE: Your concept must fit:
-   - The EXACT sentence being spoken (sync)
-   - The EMOTIONAL ARC at this point in the script (tone consistency)
-   - The VISUAL FLOW from the previous scene (avoid jarring visual jumps)
+5. NARRATIVE-AWARE: Apply the Golden Rule above (sync) and the Narrative Arc &
+   Visual Flow guidance below — every concept must fit the exact sentence, the
+   emotional arc, and the previous scene.
 
 ═══════════════════════════════════════════════
 ASSET TYPE AND STYLE TAG SELECTION
 ═══════════════════════════════════════════════
-You MUST set asset_type and style_tag on EVERY concept — including inside icon_list
-and support_icons arrays. Do not leave them empty or default everything to the same.
+You MUST set asset_type and style_tag on EVERY concept — including all items inside
+icon_list and support_icons. This is final — no second review.
 
-Read the full script arc before deciding:
-- Tension / conflict / negative emotions     → silhouette or pencil_sketch
-- Neutral factual / process / explanatory   → silhouette or outline
-- Warm positive / resolution / calm         → light_colored
-- Bold call-to-action / UI / color IS point → solid
-- Intimate character moment / visible face  → sketch + pencil_sketch or light_colored
-- Symbolic / object-based / structural      → icon + outline or silhouette
+STYLE TAGS, IN PRIORITY ORDER (most-used → rarest):
+  1. colored_icon    (icon)   — DEFAULT for icons. Full natural/descriptive color
+                                 (a red apple, a blue water drop, a yellow bulb with
+                                 an orange glow). Color is part of the object's
+                                 identity, not a meaning-flag.
+  2. outline/solid    (icon)   — tied. outline = clean line-art, used when clarity
+                                 matters more than color. solid = flat BLACK or
+                                 DARK-GREY monochrome shape — no color. Use either
+                                 when a colored icon would feel wrong for the beat,
+                                 or simply to break up a run of color.
+  3. colored_sketch   (sketch) — DEFAULT for sketches. Full, vivid color range —
+                                 not pastel. Energetic, emotionally vivid, visually
+                                 engaging character moments.
+  4. light_colored    (sketch) — soft/pastel/muted. The gentler sibling of
+                                 colored_sketch — reach for it in calm, resolved,
+                                 quiet-relief beats where vivid color would feel
+                                 like too much.
+  5. pencil_sketch    (sketch) — grey/graphite, raw emotion. Reserve for genuinely
+                                 intense, intimate grief or vulnerability beats —
+                                 used sparingly, not as the general sketch default.
+  6. silhouette       (icon)   — pure black, no interior detail. Rarest tag —
+                                 cold/stark/abstract moments only.
+
+STEP 1 — Ask: Does this scene need a visible face or felt emotion?
+  YES → asset_type: "sketch" → pick from sketch tags above (colored_sketch default)
+  NO  → asset_type: "icon"   → pick from icon tags above (colored_icon default)
+
+STEP 2 — Hard rule: icon tags (colored_icon, outline, solid, silhouette) and sketch
+tags (colored_sketch, light_colored, pencil_sketch) never cross asset_type. If you
+catch yourself putting a sketch tag on an icon or vice versa, fix it before output.
+
+STEP 2b — You are not locked into only these seven tags. If a scene would genuinely
+be served better by a different rendering style — e.g. "pixel_art", "claymation",
+"flat_vector", "watercolor" — use that as the style_tag instead, and describe it
+fully in the "prompt" field (see IMAGE PROMPT WRITING below). Treat this as an
+occasional, deliberate choice for a beat that calls for it, not a way to avoid the
+seven defaults above, which should still cover the large majority of scenes.
+
+STEP 3 — Color is the default, not the only option. Within a batch:
+- Don't make every scene colored — vary it, the way you'd vary any other style_tag.
+- Don't let any single tag (colored or not) run more than ~3 scenes in a row.
+- A deterministic pass after this response also checks variety and may adjust
+  individual style_tags, so prioritize getting asset_type and the colored-vs-not
+  choice narratively right — exact run-length counting matters less than picking
+  the tag that's actually best for each scene.
 
 ═══════════════════════════════════════════════
-VISUAL FLOW — SCENE-TO-SCENE CONTINUITY
+IMAGE PROMPT WRITING — YOU WRITE THE FINAL PROMPT, NOT JUST THE CONCEPT
 ═══════════════════════════════════════════════
-Treat the sequence of scenes like a visual story. Consider:
+"concept" describes WHAT the image is (the idea/subject). "prompt" is the ACTUAL
+text handed to the image generator — nobody downstream rewrites it. You must write
+a complete "prompt" for every element and every icon_list/support_icons sub-item.
+
+Formula: prompt = concept + rendering instructions for the chosen asset_type/style_tag
+(composition, line/fill treatment, color or its absence) + white background line.
+
+RENDERING TEMPLATES BY STYLE TAG (fuse these with the concept, don't just append
+them — write it as one coherent prompt):
+
+  colored_icon   → "Design as a flat, minimal icon — bold single visual that reads
+                     instantly at any size. Centered composition with generous
+                     negative space. Natural, descriptive color. No background
+                     scene, no texture fills. Flat 2D icon. White background (#FFFFFF)."
+
+  outline        → "Design as a clean line-art icon — unfilled or lightly filled,
+                     consistent stroke weight, no gradients or shading. Centered
+                     composition, generous negative space. White background (#FFFFFF)."
+
+  solid          → "Design as a flat, minimal icon — bold single visual that reads
+                     instantly at any size. Centered composition with generous
+                     negative space. No background scene, no texture fills. Flat 2D
+                     icon. Pure solid black (or dark-grey) filled shape. No outlines,
+                     no color, no gradients, no shading. White background (#FFFFFF)."
+
+  silhouette     → "Design as a flat, minimal icon — bold single visual that reads
+                     instantly at any size. Centered composition with generous
+                     negative space. Pure solid black filled shape only — no interior
+                     detail, no outlines, no color, no gradients, no shading. Maximum
+                     contrast. White background (#FFFFFF)."
+
+  colored_sketch → "Illustrative character-style sketch, full vivid color range,
+                     expressive linework, dynamic pose and emotion. Loose but
+                     legible rendering, not photorealistic. No background scene or
+                     environment — subject only. White background (#FFFFFF)."
+
+  light_colored  → "Illustrative character-style sketch, soft pastel/muted color
+                     palette, gentle expressive linework. Loose but legible
+                     rendering, not photorealistic. No background scene or
+                     environment — subject only. White background (#FFFFFF)."
+
+  pencil_sketch  → "Illustrative character-style sketch, hand-drawn pencil/graphite
+                     feel, grey tones only, raw and intimate linework. Loose but
+                     legible rendering, not photorealistic. No background scene or
+                     environment — subject only. White background (#FFFFFF)."
+
+  other/custom style_tag → write the equivalent of the above yourself: composition,
+                     line/fill treatment, color or its absence — then the white
+                     background line. Every style still ends with a white background.
+
+NON-NEGOTIABLE RULES FOR EVERY PROMPT:
+  - ALWAYS end with a plain white background instruction ("White background
+    (#FFFFFF)."), regardless of asset_type or style_tag. No exceptions.
+  - NEVER depict real, named, or identifiable people, and never write toward
+    photorealism — every figure stays a stylized icon/sketch character, generic
+    and non-identifiable.
+  - NEVER include nudity, sexual/suggestive content, gore, or anything obscene —
+    keep every prompt fully clean and general-audience, even for raw emotional
+    beats like grief (convey it through posture/linework, not exposed/explicit
+    imagery).
+  - Keep the prompt tight and concrete — no filler, no vague adjectives without a
+    visual payoff.
+
+═══════════════════════════════════════════════
+NARRATIVE ARC & VISUAL FLOW
+═══════════════════════════════════════════════
+Read the FULL CONTEXT to find where this batch sits in the overall script. Let both
+posture/energy and style_tag follow the arc:
+  - OPENING / hook / factual           → grounding, observational figures;
+                                          icon + colored_icon (grab attention) or outline
+  - BUILDING tension / weight          → increasingly inward, isolated postures;
+                                          icon + outline or silhouette (sparingly) —
+                                          color would undercut the tension here
+  - EMOTIONAL PEAK / CLIMAX            → high-contrast, bold gesture (arms up,
+                                          a breakthrough moment); sketch + colored_sketch,
+                                          or pencil_sketch if the beat is raw grief/
+                                          vulnerability rather than triumphant
+  - RESOLUTION / warmth / calm         → open body language, forward motion, relief;
+                                          sketch + light_colored, or icon + colored_icon/outline
+  - CTA / subscribe / takeaway         → icon + colored_icon
+
+Treat the sequence of scenes as a visual story, not isolated frames:
 - If the previous scene showed a figure isolated, the next can show them reaching out
 - Build tension with posture escalation (slightly closed → fully withdrawn → breaking)
-- Resolution scenes should feel visually "lighter" or "more open" than tense ones
 - Avoid showing the exact same pose twice in consecutive scenes — vary it
-- Let style_tag shift with the arc — silhouette for tension, light_colored for relief
-
-═══════════════════════════════════════════════
-NARRATIVE ARC AWARENESS
-═══════════════════════════════════════════════
-Read the FULL CONTEXT to understand where this batch sits in the overall script:
-- OPENING sentences → grounding, neutral, observational figures
-- BUILDING tension → increasingly inward postures, isolation, weight
-- CLIMAX / KEY INSIGHT → high-contrast, bold gesture (arms up, a breakthrough moment)
-- RESOLUTION → open body language, forward motion, relief
-
-Match your icon energy to where we are in the arc.
-
-═══════════════════════════════════════════════
-MERGING RULES
-═══════════════════════════════════════════════
-Merge ONLY when:
-  1. One concept represents all merged sentences visually, OR
-  2. Using create_progressive_icons_scene where icon N matches sentence N individually.
-  3. Sentences are thematically unified and build one idea.
-  4. No sentence is visually misrepresented while it plays.
-
-Do NOT merge when sentences have different visual meanings or when merging is just
-for efficiency. Short fragments (1–4 words) are good merge candidates.
-Long distinct sentences get their own scene.
 
 ═══════════════════════════════════════════════
 LAYOUT SELECTION
@@ -598,16 +670,33 @@ Match energy to emotional tone:
   - High-impact climax (use sparingly) → elastic_scale / elastic_scale_out
 
 ═══════════════════════════════════════════════
-ICON REPETITION — AVOID VISUAL MONOTONY
+VARIETY — KEEP THE VIDEO ENGAGING
 ═══════════════════════════════════════════════
-Across consecutive scenes in this batch:
+You are making a VIDEO, not a slideshow. The viewer must stay engaged. This means:
+
+STYLE VARIETY (hardest rule):
+- colored_icon and colored_sketch are your defaults, but never make an entire
+  batch fully colored — that's as monotonous as all-outline was. Mix in
+  outline/solid/light_colored/pencil_sketch/silhouette so the batch breathes.
+- Never use the same style_tag more than 3 scenes in a row — including
+  colored_icon/colored_sketch.
+- Aim to use at least 3 different style_tags across a batch of 5+ scenes
+- Silhouette should only appear if the situation demands it, at most twice across a batch of 10+ scenes
+
+ASSET TYPE VARIETY:
+- Do not run more than 3 consecutive "icon" scenes without one "sketch" breaking it up
+- Emotional beats mid-video are your cue to insert a sketch scene
+
+VISUAL SUBJECT VARIETY:
 - Do NOT reuse the same visual subject or prop
 - Do NOT use "a figure with head bowed" or any single pose more than once per batch
-- Vary figure orientation when using figures (facing left, right, front, seated, standing, crouched)
-- Vary between figure-based and object/symbol-based icons — don't default to a human
-  silhouette every single scene if an object or symbol would communicate better
-- Vary props and objects — don't use "clock" or "mirror" twice in a row
-- Also vary style_tag across scenes — don't make everything silhouette
+- Vary figure orientation (facing left, right, front, seated, standing, crouched)
+- Alternate between figure-based and object/symbol-based icons regularly
+- Vary props — don't use "clock" or "mirror" twice consecutively
+
+The goal is a final video that feels alive — shifting tone, shifting visual style,
+shifting composition. Every time you pick a style or layout, ask: "Have I used this
+recently?" If yes, pick the next best alternative.
 
 ═══════════════════════════════════════════════
 STRICT RULES
@@ -620,7 +709,7 @@ STRICT RULES
 REQUIRED FIELDS — every element must have ALL of these:
 
   Single-slot elements (main_icon, left_icon, right_icon):
-    "slot", "name", "concept", "asset_type", "style_tag"
+    "slot", "name", "concept", "asset_type", "style_tag", "prompt"
     + the animation keys for that slot:
       main_icon  → "animate_in_main",  "animate_out_main"
       left_icon  → "animate_in_left",  "animate_out_left"
@@ -632,7 +721,7 @@ REQUIRED FIELDS — every element must have ALL of these:
       icon_list     → "animate_in_icon_list",  "animate_out_icon_list"
       support_icons → "animate_in_support",    "animate_out_support"
     + the sub-item array (icon_list or support_icons), where EACH item must have:
-      "name", "concept", "asset_type", "style_tag"
+      "name", "concept", "asset_type", "style_tag", "prompt"
 
 - "name" must be snake_case, 2–4 words, filename-safe (e.g. "broken_chain_split",
   "girl_crying_floor", "subscribe_bell_red"). No spaces, no special characters.
@@ -647,22 +736,34 @@ EXAMPLES:
 """.strip()
 
         user_prompt = f"""
-FULL CONTEXT (entire script — use this to understand emotional arc and narrative position):
+FULL CONTEXT (entire narration — use this to understand the emotional arc and narrative position):
 {" ".join(full_context_sentences)}
 
-BATCH POSITION: sentence IDs {[s.get("id") for s in batch_sentences]} out of
-{len(full_context_sentences)} total sentences in the script.
+BATCH POSITION: word IDs {[s.get("id") for s in batch_sentences]} out of
+{len(full_context_sentences)} total words in the script.
 
-BATCH (plan scenes only for these):
+BATCH (these are individual words with timestamps — group them into scenes, then plan each scene):
 {json.dumps(batch_sentences, indent=2)}
 
-Before generating each concept, ask yourself:
-1. What is the EXACT action or emotion in this sentence?
-2. What single visual — a figure, an object, a symbol, or an abstract shape —
-   communicates that most instantly? Choose whatever needs the least explanation.
-3. Does this concept flow naturally from the previous scene?
-4. Does it match the emotional arc at this point in the script?
-5. Should this be an "icon" or a "sketch"? Which style_tag fits the mood?
+STEP 1 — GROUPING (do this mentally before writing any JSON):
+- Decide which consecutive word IDs belong in each scene based on meaning and duration.
+- Each group's duration = last word's end_ms minus first word's start_ms. Cap: 5000ms (allow up to 6000ms only to avoid a jarring mid-phrase cut).
+- A single word or two-word phrase can be its own scene if it carries a strong standalone concept.
+- When cutting mid-sentence, pick the next scene's icon so it flows naturally from this one.
+
+STEP 2 — SCENE PLAN (one scene per group):
+- sentence_id: single word ID (int) if one word, or list of word IDs ([int, ...]) if grouped.
+- text: the combined text of all words in the group (space-joined).
+- layout, elements: as per your normal scene-planning rules.
+
+Final check before writing each scene:
+1. Does the concept match the EXACT meaning of these grouped words (Golden Rule),
+   and is it the single most instant visual — figure, object, or symbol — for it?
+2. Is this group's duration within the 5-second cap? (6 seconds max only if a hard
+   phrase boundary justifies it.)
+3. If this is a mid-sentence cut, does the icon/animation bridge naturally into the next scene?
+4. Have I applied STEP 1/2 above for asset_type/style_tag, and varied style, pose,
+   and subject from recent scenes per the VARIETY rules?
 
 Return strictly valid JSON in this exact shape:
 {{
@@ -675,9 +776,6 @@ Return strictly valid JSON in this exact shape:
     }}
   ]
 }}
-
-For every element concept (main_icon, left_icon, right_icon, and each item inside
-icon_list and support_icons), include "name", "asset_type", and "style_tag".
 """
 
         messages = [
@@ -688,9 +786,9 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
         logger.info("📡 Sending scene plan to AI...")
         response = call_openai(
             messages=messages,
-            max_tokens=3000,
+            max_tokens=3200,
             temperature=0.8,
-            model="openai/gpt-4o-mini",
+            increment=300,
             response_format="json",
             fallback_response={"scenes": []},
         )
@@ -700,11 +798,6 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
             logger.warning("⚠️  Invalid AI response — returning empty plan")
             return {"scenes": []}
 
-        # Build a lookup so we can find any sentence's real timestamps by its ID.
-        sentence_timing_by_id = {
-            sentence["id"]: sentence for sentence in batch_sentences
-        }
-
         scenes = response["scenes"]
 
         # ── Pass 0: Backfill missing fields & infer slots ─────────────────────
@@ -712,14 +805,88 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
         # keys on any element or sub-item, apply correct defaults before anything
         # downstream reads those fields.
         _VALID_ASSET_TYPES = {"icon", "sketch"}
-        _VALID_STYLE_TAGS = {
-            "silhouette",
+        # The AI is allowed to use style tags outside this set (e.g. "pixel_art") —
+        # this is the KNOWN set used only for template lookup / sensible defaulting,
+        # not a hard whitelist.
+        _KNOWN_STYLE_TAGS = {
+            "colored_icon",
             "outline",
             "solid",
+            "silhouette",
+            "colored_sketch",
             "light_colored",
             "pencil_sketch",
         }
+        # Safe, neutral fallback per asset_type when style_tag is missing —
+        # NOT the rarest tags (outline/light_colored), so a malformed response
+        # doesn't quietly default into "silhouette everywhere".
+        _STYLE_TAG_DEFAULT_BY_ASSET = {"icon": "outline", "sketch": "light_colored"}
         _MULTI_ICON_SLOTS = {"icon_list", "support_icons"}
+
+        # Fallback rendering instructions, keyed by known style_tag, used ONLY if
+        # the AI forgot to write a "prompt" for an element. Every branch ends with
+        # a white-background instruction — that requirement is non-negotiable
+        # regardless of style_tag.
+        _PROMPT_TEMPLATE_BY_STYLE = {
+            "colored_icon": (
+                "Design as a flat, minimal icon — bold single visual that reads "
+                "instantly at any size. Centered composition with generous negative "
+                "space. Natural, descriptive color. No background scene, no texture "
+                "fills. Flat 2D icon. White background (#FFFFFF)."
+            ),
+            "outline": (
+                "Design as a clean line-art icon — unfilled or lightly filled, "
+                "consistent stroke weight, no gradients or shading. Centered "
+                "composition, generous negative space. White background (#FFFFFF)."
+            ),
+            "solid": (
+                "Design as a flat, minimal icon — bold single visual that reads "
+                "instantly at any size. Centered composition with generous negative "
+                "space. No background scene, no texture fills. Flat 2D icon. Pure "
+                "solid black filled shape. No outlines, no color, no gradients, no "
+                "shading. White background (#FFFFFF)."
+            ),
+            "silhouette": (
+                "Design as a flat, minimal icon — bold single visual that reads "
+                "instantly at any size. Centered composition with generous negative "
+                "space. Pure solid black filled shape only — no interior detail, no "
+                "outlines, no color, no gradients, no shading. Maximum contrast. "
+                "White background (#FFFFFF)."
+            ),
+            "colored_sketch": (
+                "Illustrative character-style sketch, full vivid color range, "
+                "expressive linework, dynamic pose and emotion. Loose but legible "
+                "rendering, not photorealistic. No background scene or environment "
+                "— subject only. White background (#FFFFFF)."
+            ),
+            "light_colored": (
+                "Illustrative character-style sketch, soft pastel/muted color "
+                "palette, gentle expressive linework. Loose but legible rendering, "
+                "not photorealistic. No background scene or environment — subject "
+                "only. White background (#FFFFFF)."
+            ),
+            "pencil_sketch": (
+                "Illustrative character-style sketch, hand-drawn pencil/graphite "
+                "feel, grey tones only, raw and intimate linework. Loose but "
+                "legible rendering, not photorealistic. No background scene or "
+                "environment — subject only. White background (#FFFFFF)."
+            ),
+        }
+        # Generic fallback for a custom/unknown style_tag — still guarantees the
+        # white background rule even if the AI's own prompt is missing.
+        _PROMPT_TEMPLATE_DEFAULT = (
+            "Render in a clean, minimal {style} style true to that label — no "
+            "photorealism, no real/identifiable people, no NSFW content. White "
+            "background (#FFFFFF)."
+        )
+
+        def _fallback_prompt(concept: str, asset_type: str, style_tag: str) -> str:
+            concept_clean = (concept or "").strip().rstrip(".")
+            rendering = _PROMPT_TEMPLATE_BY_STYLE.get(
+                style_tag,
+                _PROMPT_TEMPLATE_DEFAULT.format(style=style_tag or asset_type),
+            )
+            return f"{concept_clean}. {rendering}" if concept_clean else rendering
 
         # Per-slot default animation keys
         _SLOT_ANIM_DEFAULTS = {
@@ -796,7 +963,9 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
                 if slot in _MULTI_ICON_SLOTS:
                     # Inherit parent asset_type/style_tag as fallback for sub-items
                     parent_asset_type = element.get("asset_type", "icon")
-                    parent_style_tag = element.get("style_tag", "silhouette")
+                    parent_style_tag = element.get("style_tag") or (
+                        _STYLE_TAG_DEFAULT_BY_ASSET.get(parent_asset_type, "outline")
+                    )
                     for sub_idx, item in enumerate(element.get(slot, [])):
                         if not item.get("name"):
                             item["name"] = f"{slot}_{sub_idx}"
@@ -806,24 +975,49 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
                                 if parent_asset_type in _VALID_ASSET_TYPES
                                 else "icon"
                             )
-                        if item.get("style_tag") not in _VALID_STYLE_TAGS:
+                        # style_tag is only backfilled when missing — custom/known
+                        # tags the AI wrote are both left as-is.
+                        if not item.get("style_tag"):
                             item["style_tag"] = (
                                 parent_style_tag
-                                if parent_style_tag in _VALID_STYLE_TAGS
-                                else "silhouette"
+                                or _STYLE_TAG_DEFAULT_BY_ASSET.get(
+                                    item["asset_type"], "outline"
+                                )
+                            )
+                        if not item.get("prompt"):
+                            logger.warning(
+                                f"⚠️  Scene {scene.get('sentence_id')} — '{slot}' item "
+                                f"'{item.get('name')}' missing 'prompt', using fallback template"
+                            )
+                            item["prompt"] = _fallback_prompt(
+                                item.get("concept", ""),
+                                item["asset_type"],
+                                item["style_tag"],
                             )
                 else:
                     if not element.get("name"):
                         element["name"] = slot
                     if element.get("asset_type") not in _VALID_ASSET_TYPES:
                         element["asset_type"] = "icon"
-                    if element.get("style_tag") not in _VALID_STYLE_TAGS:
-                        element["style_tag"] = "silhouette"
+                    # style_tag is only backfilled when missing — a custom/known
+                    # tag the AI wrote is left as-is.
+                    if not element.get("style_tag"):
+                        element["style_tag"] = _STYLE_TAG_DEFAULT_BY_ASSET.get(
+                            element["asset_type"], "outline"
+                        )
+                    if not element.get("prompt"):
+                        logger.warning(
+                            f"⚠️  Scene {scene.get('sentence_id')} — element "
+                            f"'{element.get('name')}' missing 'prompt', using fallback template"
+                        )
+                        element["prompt"] = _fallback_prompt(
+                            element.get("concept", ""),
+                            element["asset_type"],
+                            element["style_tag"],
+                        )
 
-        # ── Pass 1: Assign real timestamps to every scene ────────────────────
+        # ── Pass 1: Validate layout names ─────────────────────────────────────
         for scene in scenes:
-
-            # Ensure the layout the AI chose actually exists; fall back if not.
             chosen_layout = scene.get("layout")
             if not chosen_layout or chosen_layout not in _LAYOUTS_NAMES:
                 logger.warning(
@@ -832,68 +1026,7 @@ icon_list and support_icons), include "name", "asset_type", and "style_tag".
                 )
                 scene["layout"] = "create_center_scene"
 
-            # sentence_id can be a single int (one sentence) or a list of ints
-            # (multiple sentences the AI decided to merge into one scene).
-            sentence_id = scene.get("sentence_id")
-            sentence_ids = (
-                sentence_id if isinstance(sentence_id, list) else [sentence_id]
-            )
-
-            # Only keep IDs that actually exist in this batch
-            # (guards against the AI hallucinating IDs outside the batch).
-            known_ids = [sid for sid in sentence_ids if sid in sentence_timing_by_id]
-
-            if not known_ids:
-                logger.warning(
-                    f"⚠️  Scene {sentence_id} — none of its sentence IDs exist in this batch, "
-                    f"scene will have zero duration and likely be skipped"
-                )
-                scene["start_ms"] = 0
-                scene["end_ms"] = 0
-                scene["duration"] = 0.0
-                continue
-
-            # For a merged scene, start at the earliest sentence and end at the latest.
-            # For a single sentence, this just reads that sentence's own timestamps.
-            scene["start_ms"] = min(
-                sentence_timing_by_id[sid]["start_ms"] for sid in known_ids
-            )
-            scene["end_ms"] = max(
-                sentence_timing_by_id[sid]["end_ms"] for sid in known_ids
-            )
-
-        # ── Pass 2: Fill the silence gaps between scenes ─────────────────────
-        # AssemblyAI timestamps only cover when speech is happening — pauses and
-        # breaths between sentences are unaccounted for. Without this pass, those
-        # gaps would show as a frozen frame glitch between scenes.
-        # Fix: stretch each scene's end forward to where the next scene begins.
-        for index, scene in enumerate(scenes[:-1]):  # every scene except the last
-            next_scene_start = scenes[index + 1].get("start_ms", scene["end_ms"])
-            gap_exists = next_scene_start > scene["end_ms"]
-            if gap_exists:
-                scene["end_ms"] = next_scene_start
-
-        # ── Pass 3: Ensure first scene starts at 0ms ─────────────
-        # AssemblyAI notes when first word appears and thus start_ms is
-        # captured accordingly, We need to ensure that it is always 0
-        first_scene = scenes[0]
-        if first_scene["start_ms"] > 0:
-            first_scene["start_ms"] = 0
-
-        # ── Pass 4: Stretch the last scene to cover trailing silence ─────────────
-        # AssemblyAI end_ms stops at the last spoken word — the audio file is
-        # always slightly longer due to natural decay and silence at the end.
-        # Without this, the video is always shorter than the audio.
-        audio_duration_ms = get_audio_duration_ms(audio_path)  # pass this in
-        last_scene = scenes[-1]
-        if audio_duration_ms > last_scene["end_ms"]:
-            last_scene["end_ms"] = audio_duration_ms
-
-        # ── Compute final duration for every scene ────────────────────────────────
-        for scene in scenes:
-            scene["duration"] = (scene["end_ms"] - scene["start_ms"]) / 1000
-
-        logger.info(f"✅ Plan ready — {len(scenes)} scenes")
+        logger.info(f"✅ Plan ready — {len(scenes)} scenes from {len(batch_sentences)} words")
         return response
 
     except Exception as e:

@@ -1,12 +1,12 @@
 {
     "layouts": [
         {
-            "name": "create_center_scene",
-            "description": "A single icon displayed at the center of the screen with optional entry and exit animations.",
+            "name": "center_scene",
+            "description": "A single asset displayed at the center of the screen with optional entry and exit animations.",
             "slots": {
-                "main_icon": {
-                    "description": "The primary icon to be displayed in the scene.",
-                    "type": "icon"
+                "main_asset": {
+                    "description": "The primary asset to be displayed in the scene.",
+                    "type": "asset"
                 }
             },
             "parameters": {
@@ -16,31 +16,32 @@
                 },
                 "animate_in": {
                     "type": "string",
-                    "description": "Entry animation for the icon."
+                    "description": "Entry animation for the asset."
                 },
                 "animate_out": {
                     "type": "string",
-                    "description": "Exit animation for the icon."
+                    "description": "Exit animation for the asset."
                 }
             },
             "use_cases": [
                 "Introducing a concept",
                 "Highlighting a single key idea",
                 "Minimal or clean visual storytelling",
-                "Opening or closing shots"
+                "Opening or closing shots",
+                "And similar cases"
             ]
         },
         {
-            "name": "create_side_by_side_scene",
-            "description": "Two icons displayed side by side for comparison or parallel ideas.",
+            "name": "side_by_side_scene",
+            "description": "Two assets displayed side by side for comparison or parallel ideas.",
             "slots": {
-                "left_icon": {
-                    "description": "Icon displayed on the left side of the screen.",
-                    "type": "icon"
+                "left_asset": {
+                    "description": "asset displayed on the left side of the screen.",
+                    "type": "asset"
                 },
-                "right_icon": {
-                    "description": "Icon displayed on the right side of the screen.",
-                    "type": "icon"
+                "right_asset": {
+                    "description": "asset displayed on the right side of the screen.",
+                    "type": "asset"
                 }
             },
             "parameters": {
@@ -50,39 +51,40 @@
                 },
                 "animate_left_in": {
                     "type": "string",
-                    "description": "Entry animation for left icon."
+                    "description": "Entry animation for left asset."
                 },
                 "animate_left_out": {
                     "type": "string",
-                    "description": "Exit animation for left icon."
+                    "description": "Exit animation for left asset."
                 },
                 "animate_right_in": {
                     "type": "string",
-                    "description": "Entry animation for right icon."
+                    "description": "Entry animation for right asset."
                 },
                 "animate_right_out": {
                     "type": "string",
-                    "description": "Exit animation for right icon."
+                    "description": "Exit animation for right asset."
                 }
             },
             "use_cases": [
                 "Comparisons (A vs B)",
                 "Before vs after",
                 "Contrasting ideas",
-                "Dual concepts explained simultaneously"
+                "Dual concepts explained simultaneously",
+                "And similar cases"
             ]
         },
         {
-            "name": "create_split_comparison_scene",
-            "description": "Two icons separated by a vertical divider, emphasizing a strong contrast or competition.",
+            "name": "split_comparison_scene",
+            "description": "Two assets separated by a vertical divider, emphasizing a strong contrast or competition.",
             "slots": {
-                "left_icon": {
-                    "description": "Icon displayed on the left side of the screen.",
-                    "type": "icon"
+                "left_asset": {
+                    "description": "asset displayed on the left side of the screen.",
+                    "type": "asset"
                 },
-                "right_icon": {
-                    "description": "Icon displayed on the right side of the screen.",
-                    "type": "icon"
+                "right_asset": {
+                    "description": "asset displayed on the right side of the screen.",
+                    "type": "asset"
                 }
             },
             "parameters": {
@@ -92,43 +94,44 @@
                 },
                 "animate_left_in": {
                     "type": "string",
-                    "description": "Entry animation for left icon."
+                    "description": "Entry animation for left asset."
                 },
                 "animate_left_out": {
                     "type": "string",
-                    "description": "Exit animation for left icon."
+                    "description": "Exit animation for left asset."
                 },
                 "animate_right_in": {
                     "type": "string",
-                    "description": "Entry animation for right icon."
+                    "description": "Entry animation for right asset."
                 },
                 "animate_right_out": {
                     "type": "string",
-                    "description": "Exit animation for right icon."
+                    "description": "Exit animation for right asset."
                 }
             },
             "use_cases": [
                 "Debates or conflicts",
                 "Good vs bad",
                 "Feature comparisons",
-                "Head-to-head scenarios"
+                "Head-to-head scenarios",
+                "And similar cases"
             ]
         },
         {
-            "name": "create_progressive_icons_scene",
-            "description": "Up to three icons appear sequentially with delays, useful for step-by-step or progressive storytelling.",
+            "name": "progressive_assets_scene",
+            "description": "Up to three assets appear sequentially with delays, useful for step-by-step or progressive storytelling.",
             "slots": {
-                "icon_1": {
-                    "description": "First icon to appear in the sequence.",
-                    "type": "icon"
+                "asset_1": {
+                    "description": "First asset to appear in the sequence.",
+                    "type": "asset"
                 },
-                "icon_2": {
-                    "description": "Second icon to appear in the sequence.",
-                    "type": "icon"
+                "asset_2": {
+                    "description": "Second asset to appear in the sequence.",
+                    "type": "asset"
                 },
-                "icon_3": {
-                    "description": "Third icon to appear in the sequence.",
-                    "type": "icon"
+                "asset_3": {
+                    "description": "Third asset to appear in the sequence.",
+                    "type": "asset"
                 }
             },
             "parameters": {
@@ -138,43 +141,44 @@
                 },
                 "animate_each_in": {
                     "type": "string",
-                    "description": "Entry animation applied to all icons."
+                    "description": "Entry animation applied to all assets."
                 },
                 "animate_each_out": {
                     "type": "string",
-                    "description": "Exit animation applied to all icons."
+                    "description": "Exit animation applied to all assets."
                 }
             },
             "use_cases": [
                 "Step-by-step explanation",
                 "Listing items",
                 "Sequential storytelling",
-                "Cause → effect → result"
+                "Cause → effect → result",
+                "And similar cases"
             ]
         },
         {
-            "name": "create_center_with_support_scene",
-            "description": "A main central icon supported by multiple smaller icons arranged around it, showing relationships or ecosystems.",
+            "name": "center_with_support_scene",
+            "description": "A main central asset supported by multiple smaller assets arranged around it, showing relationships or ecosystems.",
             "slots": {
-                "main_icon": {
-                    "description": "The primary icon at the center.",
-                    "type": "icon"
+                "main_asset": {
+                    "description": "The primary asset at the center.",
+                    "type": "asset"
                 },
-                "support_icon_1": {
-                    "description": "First supporting icon around the main icon.",
-                    "type": "icon"
+                "support_asset_1": {
+                    "description": "First supporting asset around the main asset.",
+                    "type": "asset"
                 },
-                "support_icon_2": {
-                    "description": "Second supporting icon around the main icon.",
-                    "type": "icon"
+                "support_asset_2": {
+                    "description": "Second supporting asset around the main asset.",
+                    "type": "asset"
                 },
-                "support_icon_3": {
-                    "description": "Third supporting icon around the main icon.",
-                    "type": "icon"
+                "support_asset_3": {
+                    "description": "Third supporting asset around the main asset.",
+                    "type": "asset"
                 },
                 "...": {
-                    "description": "Additional supporting icons can be added as needed.",
-                    "type": "icon"
+                    "description": "Additional supporting assets can be added as needed.",
+                    "type": "asset"
                 }
             },
             "parameters": {
@@ -184,26 +188,27 @@
                 },
                 "animate_main_in": {
                     "type": "string",
-                    "description": "Entry animation for main icon."
+                    "description": "Entry animation for main asset."
                 },
                 "animate_main_out": {
                     "type": "string",
-                    "description": "Exit animation for main icon."
+                    "description": "Exit animation for main asset."
                 },
                 "animate_support_in": {
                     "type": "string",
-                    "description": "Entry animation for support icons."
+                    "description": "Entry animation for support assets."
                 },
                 "animate_support_out": {
                     "type": "string",
-                    "description": "Exit animation for support icons."
+                    "description": "Exit animation for support assets."
                 }
             },
             "use_cases": [
                 "Core idea with supporting elements",
                 "Ecosystem or network visualization",
                 "Main feature with sub-features",
-                "Hub-and-spoke storytelling"
+                "Hub-and-spoke storytelling",
+                "And similar cases"
             ]
         }
     ]

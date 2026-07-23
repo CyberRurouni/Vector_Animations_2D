@@ -36,15 +36,22 @@ async def generate_audio(script: str, segment: str) -> str | None:
     from google.genai import types
 
     prompt = f"""
-    You are a charismatic storyteller.
+    You are a professional voice narrator.
+
+    CRITICAL RULES:
+    - You MUST read the text EXACTLY as written.
+    - Do NOT skip, summarize, or rephrase anything.
+    - Do NOT remove headings, titles, or structure.
+    - Every word, including phrases like "Chapter 1", "Chapter 2", and section titles MUST be spoken.
+    - If a line is in ALL CAPS, treat it as emphasized speech, but STILL read it fully.
+    - Preserve the structure and order exactly.
 
     Voice style:
-    - Energetic but natural (not robotic)
-    - Conversational, like sharing a secret
-    - Emphasize key phrases emotionally
-    - Vary tone (curiosity → tension → revelation)
+    - Energetic but natural
+    - Conversational, but precise
+    - Add emphasis through tone, NOT by changing words
 
-    Narrate this script:
+    Narrate this script verbatim:
 
     {script}
     """
@@ -127,9 +134,9 @@ def _write_wav(audio_bytes: bytes, output_path: str):
 
 if __name__ == "__main__":
     script = """
-THE DEAD EYE TECHNIQUE
+    If this one resonated, subscribe. Because the people who understand these patterns always stay one step ahead.
 """
 
 
-    result = asyncio.run(generate_audio(script, "The_Missing_Piece_2"))
+    result = asyncio.run(generate_audio(script, "Ending"))
     print(f"{'✅' if result else '❌'} {result or 'Failed'}")
